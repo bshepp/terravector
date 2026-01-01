@@ -2,6 +2,8 @@
 
 Terrain patch similarity search using decomposition-based embeddings and HNSW indexing.
 
+> **Note:** This is an exploratory project and very much a work in progress. Built in an afternoon after reading about HNSW vector search and realizing it could apply to terrain analysis. Expect rough edges, evolving APIs, and experimental features. Feedback and contributions welcome.
+
 ## Overview
 
 terravector converts Digital Elevation Models (DEMs) into searchable vector embeddings. Each terrain patch gets a "fingerprint" based on how different signal decomposition methods respond to it. An HNSW index enables O(log N) similarity queries across millions of patches.
