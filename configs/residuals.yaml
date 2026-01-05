@@ -1,0 +1,35 @@
+# terravector signature configuration
+# Residuals: DIVERGE-style decomposition × upsampling combinations
+
+signature:
+  decomposition:
+    enabled: false
+
+  geomorphometric:
+    enabled: false
+
+  texture:
+    enabled: false
+
+  residuals:
+    enabled: true
+    # Decomposition methods to use
+    decomposition_methods:
+      - gaussian
+      - bilateral
+      - wavelet_dwt
+      - morphological
+    # Upsampling methods to combine with each decomposition
+    upsampling_methods:
+      - bicubic
+      - lanczos
+      - bspline
+      - fft_zeropad
+    # Use rich analysis (20 dims) or basic stats (6 dims) per combination
+    use_rich_analysis: true
+
+# 4 decomp × 4 upsamp = 16 combinations × 20 dims = 320 dimensions
+
+normalize: true
+space: cosinesimil
+

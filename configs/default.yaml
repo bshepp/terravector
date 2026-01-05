@@ -1,0 +1,42 @@
+# terravector signature configuration
+# Default: decomposition only (original behavior)
+
+signature:
+  decomposition:
+    enabled: true
+    methods:
+      - gaussian
+      - bilateral
+      - wavelet_dwt
+      - morphological
+      - tophat
+      - polynomial
+    # Optional method-specific parameters:
+    # params:
+    #   gaussian:
+    #     sigma: 10
+    #   bilateral:
+    #     d: 9
+    #     sigma_color: 75
+    #     sigma_space: 75
+
+  geomorphometric:
+    enabled: false
+    features:
+      - slope
+      - aspect
+      - curvature
+      - tpi
+      - tri
+      - roughness
+
+  texture:
+    enabled: false
+    features:
+      - glcm
+      - lbp
+
+# Index settings
+normalize: true
+space: cosinesimil  # cosinesimil, l2, or l1
+

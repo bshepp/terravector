@@ -1,15 +1,25 @@
 """
 Embedding Extraction Module
 
-Converts terrain patches into feature vectors using decomposition signatures.
+Converts terrain patches into feature vectors using configurable signatures.
+
+Supports five signature types (combinable via config):
+- Decomposition: Signal processing residual statistics (original method)
+- Geomorphometric: Classic terrain derivatives (slope, curvature, etc.)
+- Texture: Image texture features (GLCM, LBP)
+- Residuals: DIVERGE-style decomposition × upsampling combinations
+- Directional FFT: Frequency analysis at multiple angles for oriented features
 """
 
 import numpy as np
-from typing import List, Dict, Optional, Callable, Any
+from typing import List, Dict, Optional, Callable, Any, TYPE_CHECKING
 from scipy.stats import entropy as scipy_entropy
 
 from .decomposition import DECOMPOSITION_METHODS, DEFAULT_PARAMS
 from .tiling import Patch
+
+if TYPE_CHECKING:
+    from .config import SignatureConfig
 
 
 def compute_residual_stats(residual: np.ndarray) -> List[float]:
@@ -232,4 +242,272 @@ def apply_normalization(
         return (embeddings - params['min']) / params['range']
     else:
         raise ValueError(f"Unknown normalization method: {method}")
+
+
+# =============================================================================
+# RESIDUALS-Style Embedding (decomposition × upsampling)
+# =============================================================================
+
+def compute_residuals_embedding(
+    patch: np.ndarray,
+    decomposition_methods: List[str],
+    upsampling_methods: List[str],
+    use_rich_analysis: bool = True,
+    decomp_params: Optional[Dict[str, Dict[str, Any]]] = None,
+    upsamp_params: Optional[Dict[str, Dict[str, Any]]] = None
+) -> np.ndarray:
+    """
+    Compute RESIDUALS-style embedding from decomposition × upsampling combinations.
+    
+    For each decomposition method:
+      1. Decompose patch → get residual
+      2. For each upsampling method:
+         a. Downsample residual by 2x
+         b. Upsample back using method
+         c. Compute analysis on upsampled residual
+    
+    Args:
+        patch: 2D numpy array
+        decomposition_methods: List of decomposition method names
+        upsampling_methods: List of upsampling method names
+        use_rich_analysis: Use 20-dim analysis or 6-dim basic stats
+        decomp_params: Parameters for decomposition methods
+        upsamp_params: Parameters for upsampling methods
+        
+    Returns:
+        1D feature vector
+    """
+    from .decomposition import run_decomposition
+    from .upsampling import run_upsampling
+    from .features.analysis import analyze_features, analysis_to_vector
+    from scipy.ndimage import zoom
+    
+    if decomp_params is None:
+        decomp_params = {}
+    if upsamp_params is None:
+        upsamp_params = {}
+    
+    embedding_parts = []
+    
+    for decomp_name in decomposition_methods:
+        try:
+            # Get decomposition residual
+            trend, residual = run_decomposition(
+                decomp_name, patch, 
+                params=decomp_params.get(decomp_name)
+            )
+        except Exception:
+            # If decomposition fails, use zeros
+            n_upsamp = len(upsampling_methods)
+            dim_per = 20 if use_rich_analysis else 6
+            embedding_parts.append(np.zeros(n_upsamp * dim_per, dtype=np.float32))
+            continue
+        
+        for upsamp_name in upsampling_methods:
+            try:
+                # Downsample residual by 2x
+                residual_down = zoom(residual, 0.5, order=1)
+                
+                # Upsample back
+                residual_up = run_upsampling(
+                    upsamp_name, residual_down, scale=2,
+                    params=upsamp_params.get(upsamp_name)
+                )
+                
+                # Ensure same size as original
+                min_h = min(residual.shape[0], residual_up.shape[0])
+                min_w = min(residual.shape[1], residual_up.shape[1])
+                residual_up = residual_up[:min_h, :min_w]
+                
+                # Compute analysis
+                if use_rich_analysis:
+                    analysis = analyze_features(residual_up)
+                    stats = analysis_to_vector(analysis)
+                else:
+                    stats = np.array(compute_residual_stats(residual_up), dtype=np.float32)
+                
+                embedding_parts.append(stats)
+                
+            except Exception:
+                dim = 20 if use_rich_analysis else 6
+                embedding_parts.append(np.zeros(dim, dtype=np.float32))
+    
+    return np.concatenate(embedding_parts)
+
+
+# =============================================================================
+# Config-Based Embedding (New API)
+# =============================================================================
+
+def compute_embedding_from_config(
+    patch: np.ndarray,
+    config: 'SignatureConfig'
+) -> np.ndarray:
+    """
+    Compute embedding vector using configuration-specified signature types.
+    
+    Concatenates features from all enabled signature types in order:
+    1. Decomposition (if enabled)
+    2. Geomorphometric (if enabled)
+    3. Texture (if enabled)
+    4. Residuals - decomp × upsamp combinations (if enabled)
+    
+    Args:
+        patch: 2D numpy array (terrain patch)
+        config: SignatureConfig specifying which features to compute
+        
+    Returns:
+        1D numpy array (combined embedding vector)
+    """
+    embedding_parts = []
+    
+    # 1. Decomposition features
+    if config.decomposition.enabled:
+        decomp_emb = compute_embedding(
+            patch,
+            methods=config.decomposition.methods,
+            method_params=config.decomposition.params
+        )
+        embedding_parts.append(decomp_emb)
+    
+    # 2. Geomorphometric features
+    if config.geomorphometric.enabled:
+        from .features.geomorphometric import compute_geomorphometric_embedding
+        geomorph_emb = compute_geomorphometric_embedding(
+            patch,
+            features=config.geomorphometric.features,
+            params=config.geomorphometric.params
+        )
+        embedding_parts.append(geomorph_emb)
+    
+    # 3. Texture features
+    if config.texture.enabled:
+        from .features.texture import compute_texture_embedding
+        texture_emb = compute_texture_embedding(
+            patch,
+            features=config.texture.features,
+            params=config.texture.params
+        )
+        embedding_parts.append(texture_emb)
+    
+    # 4. Residuals-style decomp × upsamp combinations
+    if config.residuals.enabled:
+        residuals_emb = compute_residuals_embedding(
+            patch,
+            decomposition_methods=config.residuals.decomposition_methods,
+            upsampling_methods=config.residuals.upsampling_methods,
+            use_rich_analysis=config.residuals.use_rich_analysis,
+            decomp_params=config.residuals.decomposition_params,
+            upsamp_params=config.residuals.upsampling_params
+        )
+        embedding_parts.append(residuals_emb)
+    
+    # 5. Directional FFT features
+    if config.directional_fft.enabled:
+        from .features.directional_fft import compute_directional_fft_embedding
+        fft_emb = compute_directional_fft_embedding(
+            patch,
+            angles=config.directional_fft.angles,
+            stats=config.directional_fft.stats
+        )
+        embedding_parts.append(fft_emb)
+    
+    if not embedding_parts:
+        raise ValueError("No signature types enabled in config")
+    
+    return np.concatenate(embedding_parts)
+
+
+def compute_embeddings_batch_from_config(
+    patches: List[Patch],
+    config: 'SignatureConfig',
+    verbose: bool = True
+) -> np.ndarray:
+    """
+    Compute embeddings for a batch of patches using config.
+    
+    Args:
+        patches: List of Patch objects
+        config: SignatureConfig specifying which features to compute
+        verbose: Print progress
+        
+    Returns:
+        2D numpy array of shape (n_patches, embedding_dim)
+    """
+    if not patches:
+        return np.array([])
+    
+    embeddings = []
+    n_patches = len(patches)
+    
+    # Show what's being computed
+    if verbose:
+        enabled = config.get_enabled_types()
+        print(f"  Signature types: {', '.join(enabled)}")
+        print(f"  Expected dimension: {config.get_total_dim()}")
+    
+    for i, patch in enumerate(patches):
+        if verbose and (i + 1) % 100 == 0:
+            print(f"  Computing embeddings: {i + 1}/{n_patches}")
+        
+        emb = compute_embedding_from_config(patch.data, config)
+        embeddings.append(emb)
+    
+    if verbose:
+        print(f"  Computed {n_patches} embeddings")
+    
+    return np.vstack(embeddings)
+
+
+def get_embedding_dim_from_config(config: 'SignatureConfig') -> int:
+    """
+    Get the dimension of embeddings for a given config.
+    
+    Args:
+        config: SignatureConfig
+        
+    Returns:
+        Total embedding dimension
+    """
+    return config.get_total_dim()
+
+
+def get_embedding_labels_from_config(config: 'SignatureConfig') -> List[str]:
+    """
+    Get human-readable labels for each embedding dimension.
+    
+    Args:
+        config: SignatureConfig
+        
+    Returns:
+        List of labels for each dimension
+    """
+    labels = []
+    
+    # Decomposition labels
+    if config.decomposition.enabled:
+        stats = ['mean', 'std', 'energy', 'entropy', 'range', 'median']
+        for method in config.decomposition.methods:
+            for stat in stats:
+                labels.append(f"decomp_{method}_{stat}")
+    
+    # Geomorphometric labels
+    if config.geomorphometric.enabled:
+        from .features.geomorphometric import get_geomorphometric_labels
+        labels.extend(get_geomorphometric_labels(config.geomorphometric.features))
+    
+    # Texture labels
+    if config.texture.enabled:
+        from .features.texture import get_texture_labels
+        labels.extend(get_texture_labels(config.texture.features))
+    
+    # Directional FFT labels
+    if config.directional_fft.enabled:
+        from .features.directional_fft import get_directional_fft_labels
+        labels.extend(get_directional_fft_labels(
+            config.directional_fft.angles,
+            config.directional_fft.stats
+        ))
+    
+    return labels
 

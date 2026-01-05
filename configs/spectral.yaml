@@ -1,0 +1,40 @@
+# Spectral Configuration
+# Directional FFT signatures for detecting oriented terrain features
+#
+# Use cases:
+# - Linear feature detection (ridges, valleys, drainage networks)
+# - Oriented texture patterns (agricultural fields, geological structures)
+# - Man-made infrastructure (roads, field boundaries)
+
+signature:
+  decomposition:
+    enabled: false
+  
+  geomorphometric:
+    enabled: false
+  
+  texture:
+    enabled: false
+  
+  residuals:
+    enabled: false
+  
+  directional_fft:
+    enabled: true
+    # Angles in degrees (0° = horizontal, 90° = vertical in spatial domain)
+    # Using 8 angles at 22.5° intervals for fine angular resolution
+    angles: [0, 22.5, 45, 67.5, 90, 112.5, 135, 157.5]
+    # Statistics computed per angle
+    stats:
+      - energy           # Total spectral energy
+      - low_freq_ratio   # Large-scale features
+      - high_freq_ratio  # Fine detail
+      - peak_freq        # Dominant frequency
+      - spectral_centroid # Center of spectral mass
+      - spectral_spread  # Frequency spread
+
+# Total dimensions: 8 angles × 6 stats = 48
+
+normalize: true
+space: cosinesimil
+

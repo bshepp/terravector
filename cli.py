@@ -6,6 +6,7 @@ Command-line interface for terrain similarity search.
 
 Usage:
     python cli.py build <dem_path> --patch-size 64 --output terrain.idx
+    python cli.py build <dem_path> --config signature.yaml --output terrain.idx
     python cli.py query <index_path> --patch 42 --k 10
     python cli.py query <index_path> --patch 42 --k 10 --dem <dem_path> --visualize results.png
     python cli.py info <index_path>
@@ -21,15 +22,55 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.utils.io import load_dem, get_dem_info
 from src.tiling import tile_dem, patches_to_metadata, get_tiling_info
-from src.embedding import compute_embeddings_batch, get_embedding_dim
+from src.embedding import (
+    compute_embeddings_batch,
+    compute_embeddings_batch_from_config,
+    get_embedding_dim,
+)
 from src.index import TerrainIndex, build_index
+from src.config import (
+    load_config,
+    get_default_config,
+    get_preset,
+    validate_config,
+    SignatureConfig,
+)
 
 
 def cmd_build(args):
     """Build index from DEM."""
     dem_path = str(Path(args.dem_path).resolve())
     
-    print(f"Loading DEM: {dem_path}")
+    # Load or create configuration
+    config = None
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            print(f"Loading config: {args.config}")
+            config = load_config(args.config)
+        else:
+            # Try as preset name
+            try:
+                print(f"Using preset: {args.config}")
+                config = get_preset(args.config)
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+        
+        # Validate config
+        errors = validate_config(config)
+        if errors:
+            print("Config validation errors:")
+            for err in errors:
+                print(f"  - {err}")
+            return 1
+        
+        # Show signature composition
+        enabled = config.get_enabled_types()
+        print(f"  Signature types: {', '.join(enabled)}")
+        print(f"  Expected dimension: {config.get_total_dim()}")
+    
+    print(f"\nLoading DEM: {dem_path}")
     dem = load_dem(args.dem_path)
     
     info = get_dem_info(dem)
@@ -52,7 +93,10 @@ def cmd_build(args):
         return 1
     
     print("\nComputing embeddings...")
-    embeddings = compute_embeddings_batch(patches, verbose=True)
+    if config:
+        embeddings = compute_embeddings_batch_from_config(patches, config, verbose=True)
+    else:
+        embeddings = compute_embeddings_batch(patches, verbose=True)
     print(f"  Embedding dimension: {embeddings.shape[1]}")
     
     print("\nBuilding HNSW index...")
@@ -63,13 +107,21 @@ def cmd_build(args):
         metadata[pid]['dem_path'] = dem_path
         metadata[pid]['patch_size'] = args.patch_size
     
+    # Get space from config or args
+    space = config.space if config else args.space
+    normalize = config.normalize if config else not args.no_normalize
+    
     index = build_index(
         embeddings,
         metadata,
-        space=args.space,
+        space=space,
         M=args.M,
-        normalize=not args.no_normalize
+        normalize=normalize
     )
+    
+    # Store config info in index for later reference
+    if config:
+        index.signature_config = config.to_dict()
     
     stats = index.get_stats()
     print(f"  Index built with {stats['n_patches']} patches")
@@ -212,6 +264,32 @@ def cmd_info(args):
     print(f"  Source DEM:    {dem_path}")
     print(f"  Patch size:    {patch_size}")
     
+    # Signature configuration (if available)
+    if hasattr(index, 'signature_config') and index.signature_config:
+        sig = index.signature_config.get('signature', {})
+        print("\nSignature Configuration:")
+        print("-" * 40)
+        
+        # Decomposition
+        decomp = sig.get('decomposition', {})
+        if decomp.get('enabled', False):
+            methods = decomp.get('methods', [])
+            print(f"  Decomposition: {', '.join(methods)}")
+        
+        # Geomorphometric
+        geomorph = sig.get('geomorphometric', {})
+        if geomorph.get('enabled', False):
+            features = geomorph.get('features', [])
+            print(f"  Geomorphometric: {', '.join(features)}")
+        
+        # Texture
+        texture = sig.get('texture', {})
+        if texture.get('enabled', False):
+            features = texture.get('features', [])
+            print(f"  Texture: {', '.join(features)}")
+    else:
+        print("\nSignature: decomposition (default)")
+    
     # Embedding statistics
     if index.embeddings is not None:
         emb = index.embeddings
@@ -246,6 +324,7 @@ def main():
     build_parser = subparsers.add_parser('build', help='Build index from DEM')
     build_parser.add_argument('dem_path', help='Path to DEM file (.npy or .tif)')
     build_parser.add_argument('--output', '-o', required=True, help='Output index path')
+    build_parser.add_argument('--config', '-c', help='Signature config file (YAML) or preset name (default, classic, texture, hybrid, minimal)')
     build_parser.add_argument('--patch-size', type=int, default=64, help='Patch size (default: 64)')
     build_parser.add_argument('--overlap', type=int, default=0, help='Patch overlap (default: 0)')
     build_parser.add_argument('--min-valid', type=float, default=0.8, help='Min valid pixel fraction (default: 0.8)')

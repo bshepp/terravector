@@ -44,6 +44,7 @@ class TerrainIndex:
         self.embeddings: Optional[np.ndarray] = None
         self.metadata: Dict[int, Dict[str, Any]] = {}
         self.normalization_params: Optional[Dict[str, Any]] = None
+        self.signature_config: Optional[Dict[str, Any]] = None  # Signature configuration
         self.is_built = False
     
     def build(
@@ -171,6 +172,7 @@ class TerrainIndex:
             'embeddings': self.embeddings,
             'metadata': self.metadata,
             'normalization_params': self.normalization_params,
+            'signature_config': self.signature_config,
             'dim': self.dim,
             'space': self.space,
             'M': self.M,
@@ -214,6 +216,7 @@ class TerrainIndex:
         index.embeddings = data['embeddings']
         index.metadata = data['metadata']
         index.normalization_params = data['normalization_params']
+        index.signature_config = data.get('signature_config')  # May not exist in older indices
         index.is_built = True
         
         return index

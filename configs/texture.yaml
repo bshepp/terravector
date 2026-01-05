@@ -1,0 +1,28 @@
+# terravector signature configuration
+# Texture: image texture features only
+
+signature:
+  decomposition:
+    enabled: false
+
+  geomorphometric:
+    enabled: false
+
+  texture:
+    enabled: true
+    features:
+      - glcm
+      - lbp
+    params:
+      glcm:
+        distances: [1, 2, 4]
+        angles: [0, 45, 90, 135]
+        levels: 64
+      lbp:
+        radius: 3
+        n_points: 24
+        method: uniform
+
+normalize: true
+space: cosinesimil
+

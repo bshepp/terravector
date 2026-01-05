@@ -1,0 +1,30 @@
+# terravector signature configuration
+# Classic: geomorphometric features only (traditional terrain analysis)
+
+signature:
+  decomposition:
+    enabled: false
+
+  geomorphometric:
+    enabled: true
+    features:
+      - slope
+      - aspect
+      - curvature
+      - tpi
+      - tri
+      - roughness
+    params:
+      tpi:
+        radius: 10
+      tri:
+        window_size: 3
+      roughness:
+        window_size: 3
+
+  texture:
+    enabled: false
+
+normalize: true
+space: cosinesimil
+

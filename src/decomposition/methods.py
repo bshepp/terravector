@@ -2,7 +2,7 @@
 Core Decomposition Methods for terravector
 
 Standalone implementations of signal decomposition methods for DEM analysis.
-Adapted from RESIDUALS project.
+Ported from DIVERGE/RESIDUALS project.
 
 Methods:
 - Gaussian (Classical low-pass)
@@ -21,20 +21,34 @@ import cv2
 import pywt
 from typing import Tuple, Dict, Callable, Any
 
+from .registry import register_decomposition, DECOMPOSITION_REGISTRY
 
-# Registry of all decomposition methods
+
+# Legacy exports for backwards compatibility
+def _get_methods():
+    return {name: m.func for name, m in DECOMPOSITION_REGISTRY.items()}
+
+def _get_params():
+    return {name: m.default_params for name, m in DECOMPOSITION_REGISTRY.items()}
+
+# These will be populated after methods are registered
 DECOMPOSITION_METHODS: Dict[str, Callable] = {}
-
-# Default parameters for each method
 DEFAULT_PARAMS: Dict[str, Dict[str, Any]] = {}
 
 
 def _register(name: str, default_params: Dict[str, Any]):
-    """Simple registration decorator."""
+    """Legacy registration decorator - wraps new registry."""
     def decorator(func):
+        # Use new registry
+        registered = register_decomposition(
+            name=name,
+            category='core',
+            default_params=default_params
+        )(func)
+        # Also populate legacy dicts
         DECOMPOSITION_METHODS[name] = func
         DEFAULT_PARAMS[name] = default_params
-        return func
+        return registered
     return decorator
 
 

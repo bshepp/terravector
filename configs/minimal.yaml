@@ -1,0 +1,26 @@
+# terravector signature configuration
+# Minimal: fast computation with reduced feature set
+
+signature:
+  decomposition:
+    enabled: true
+    methods:
+      - gaussian
+      - morphological
+    # Fewer methods = faster computation
+
+  geomorphometric:
+    enabled: true
+    features:
+      - slope
+      - curvature
+    # Core terrain derivatives only
+
+  texture:
+    enabled: false
+
+# Total embedding dimension: 12 (decomp) + 12 (geomorph) = 24
+
+normalize: true
+space: cosinesimil
+

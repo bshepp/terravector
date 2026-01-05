@@ -1,0 +1,35 @@
+# terravector signature configuration
+# Hybrid: all signature types combined (maximum discrimination)
+
+signature:
+  decomposition:
+    enabled: true
+    methods:
+      - gaussian
+      - bilateral
+      - wavelet_dwt
+      - morphological
+      - tophat
+      - polynomial
+
+  geomorphometric:
+    enabled: true
+    features:
+      - slope
+      - aspect
+      - curvature
+      - tpi
+      - tri
+      - roughness
+
+  texture:
+    enabled: true
+    features:
+      - glcm
+      - lbp
+
+# Total embedding dimension: 36 (decomp) + 36 (geomorph) + 16 (texture) = 88
+
+normalize: true
+space: cosinesimil
+
