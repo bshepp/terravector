@@ -1,0 +1,45 @@
+# Spectral Hybrid Configuration
+# Combines decomposition signatures with directional FFT
+#
+# Use cases:
+# - Complete terrain characterization with spatial + spectral features
+# - Detecting both local morphology and oriented patterns
+# - Balanced approach for general-purpose similarity search
+
+signature:
+  decomposition:
+    enabled: true
+    methods:
+      - gaussian
+      - bilateral
+      - wavelet_dwt
+      - morphological
+      - tophat
+      - polynomial
+  
+  geomorphometric:
+    enabled: false
+  
+  texture:
+    enabled: false
+  
+  residuals:
+    enabled: false
+  
+  directional_fft:
+    enabled: true
+    # Using 4 cardinal angles for efficiency
+    angles: [0, 45, 90, 135]
+    stats:
+      - energy
+      - low_freq_ratio
+      - high_freq_ratio
+      - peak_freq
+      - spectral_centroid
+      - spectral_spread
+
+# Total dimensions: 36 (decomp) + 24 (FFT) = 60
+
+normalize: true
+space: cosinesimil
+
