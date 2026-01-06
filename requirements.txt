@@ -7,4 +7,6 @@ nmslib>=2.1.0
 matplotlib>=3.5.0
 PyYAML>=6.0
 gradio>=4.0.0
+napari[all]>=0.4.18
+magicgui>=0.7.0
 

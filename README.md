@@ -24,9 +24,25 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Web UI (Recommended)
+### Desktop Viewer (Recommended for Scientists)
 
-Launch the interactive Gradio interface:
+Launch the napari-based desktop viewer for smooth pan/zoom and advanced overlays:
+
+```bash
+python viewer.py path/to/dem.npy path/to/index.idx
+```
+
+**Features:**
+- **Click to Query**: Click any tile to find similar patches
+- **Box Overlay**: Colored rectangles around similar tiles (green = query, orange = results)
+- **Heatmap**: Similarity scores as color intensity (blue → red)
+- **Fade Effect**: Dim non-matching tiles to highlight results
+- **Threshold Slider**: Filter results by distance
+- **GPU-accelerated**: Smooth pan/zoom even on large DEMs
+
+### Web UI
+
+Launch the Gradio web interface for browser-based exploration:
 
 ```bash
 python app.py
@@ -176,6 +192,7 @@ The UI runs locally — your data never leaves your machine.
 ```
 terravector/
 ├── app.py                     # Gradio web UI
+├── viewer.py                  # Napari desktop viewer
 ├── cli.py                     # Command-line interface
 ├── src/
 │   ├── config.py              # YAML config parsing
@@ -199,6 +216,10 @@ terravector/
 │   ├── ui/                    # Gradio UI components
 │   │   ├── state.py           # Application state management
 │   │   └── components.py      # Visualization helpers
+│   ├── viewer/                # Napari desktop viewer
+│   │   ├── app.py             # Main viewer class
+│   │   ├── layers.py          # Overlay layer generators
+│   │   └── widgets.py         # Qt control widgets
 │   └── utils/
 │       └── io.py              # DEM loading, index persistence
 ├── configs/                   # Signature configurations
@@ -222,6 +243,7 @@ terravector/
 - matplotlib (visualization)
 - PyYAML (configuration)
 - gradio (web UI)
+- napari (desktop viewer - GPU-accelerated)
 
 ## Inspiration
 
