@@ -41,6 +41,7 @@ Thumbs.db
 data/*.idx
 data/*.idx.dat
 data/*.meta
+data/*.corpus.json
 data/patch*_similar.png
 !data/similar_patches.png
 
@@ -48,6 +49,12 @@ data/patch*_similar.png
 *.tif
 *.tiff
 data/*.npy
+
+# County corpus build artifacts (per-tile checkpoints, ~50 MB+)
+data/licking_county/
+
+# Separability sweep outputs
+data/separability/
 
 # Jupyter
 .ipynb_checkpoints/

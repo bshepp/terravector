@@ -148,6 +148,26 @@ Frequency analysis at multiple angles through the 2D FFT:
 | `spectral` | Directional FFT (8 angles) | 48 | Oriented feature detection |
 | `spectral_hybrid` | Decomposition + FFT | 60 | Combined spatial + spectral |
 
+### Residuals signature: optional amplification stages
+
+The `residuals` family supports two experimental stages on top of the base
+decomposition × upsampling grid. Both are off by default and toggled via
+the `residuals:` section in the YAML config (see `src/config.py` for full param list):
+
+- **`bidirectional: true`** — for each (decomp, upsamp) pair, also compute
+  the reverse path (up then down) and emit the analysis of the (A − B)
+  asymmetry as an extra slot. Doubles the residuals slice (320 → 640 d
+  on the default 4×4 grid).
+- **`turing_intermediate: true`** — pass each round-trip output through
+  `turing_iterations` Gray-Scott reaction-diffusion steps before analysis.
+  Subtle textural differences settle into discretely different attractor
+  patterns, improving downstream HNSW separability at a compute cost.
+
+Run `python compare_separability.py` to sweep these variants against the
+vanilla residuals signature and measure within-tile vs across-tile cosine
+distance — i.e. whether the amplification actually pulls similar terrain
+together and pushes dissimilar terrain apart.
+
 ### Custom Configuration
 
 Create a YAML file in `configs/` for fine-grained control:
@@ -187,15 +207,74 @@ python app.py
 
 The UI runs locally — your data never leaves your machine.
 
+## REST API
+
+`api.py` exposes the loaded index as a FastAPI service for integration with
+external tools (QGIS plugin, web frontends, scripts).
+
+```bash
+# Point at an index built by build_county_index.py
+TERRAVECTOR_INDEX=data/licking_county/licking_county.idx \
+    uvicorn api:app --reload --host 127.0.0.1 --port 8000
+```
+
+Interactive Swagger docs at `http://127.0.0.1:8000/docs`.
+
+**Endpoints:**
+- `GET  /health` — index/bridge readiness
+- `GET  /info` — index stats, county bounds (both State Plane and WGS84), signature types
+- `POST /query/by-id` — `{patch_id, k}` → similar patches enriched with bbox + center
+- `POST /query/by-coords` — `{lon, lat, k}` or `{x, y, crs, k}` → resolves to a patch, then queries
+
+Spatial endpoints return results with both State Plane (EPSG:3735, ft) and
+WGS84 bounding boxes when the index ships with a `*.corpus.json` sidecar.
+Without one, the bridge endpoints respond 501.
+
+Quick sanity check that a point of interest is inside your corpus
+(no full index load required):
+
+```bash
+python check_coords.py --lat 40.0279 --lon -82.4590 \
+    --corpus data/licking_county/licking_county.corpus.json
+```
+
+## Building the Licking County corpus
+
+`build_county_index.py` is the production pipeline that turns the RESIDUALS
+sibling project's 200 cached county tiles into a single unified HNSW index
+(~870K patches at the default `residuals` preset).
+
+```bash
+python build_county_index.py --dry-run    # plan only
+python build_county_index.py              # full build (~hours)
+python build_county_index.py --resume     # skip already-checkpointed tiles
+```
+
+The build is **checkpointed per tile** under `data/licking_county/checkpoints/`
+(gitignored), so it's safe to interrupt and resume. A per-tile sidecar
+`*_diagnostics.json` records any (decomp, upsamp) pairs that failed silently
+during embedding, and the final `*.corpus.json` rolls those failures up
+across tiles — useful for spotting a decomposition method that's broken
+in production before the index is opaque.
+
+The path constants at the top of `build_county_index.py` are currently
+hardcoded for a Windows workstation; if you're running elsewhere, edit
+`COUNTY_TILES_DIR`, `OUTPUT_DIR`, and `CONFIG_PATH`.
+
 ## Project Structure
 
 ```
 terravector/
 ├── app.py                     # Gradio web UI
+├── api.py                     # FastAPI REST service
 ├── viewer.py                  # Napari desktop viewer
 ├── cli.py                     # Command-line interface
+├── build_county_index.py      # Licking County corpus pipeline (checkpointed)
+├── compare_separability.py    # Sweep residuals signature variants
+├── check_coords.py            # Quick "is this point in the corpus?" check
 ├── src/
 │   ├── config.py              # YAML config parsing
+│   ├── coords.py              # WGS84 ↔ State Plane ↔ patch ID bridge
 │   ├── tiling.py              # DEM → patches
 │   ├── decomposition/         # Signal decomposition methods
 │   │   ├── methods.py         # Core decomposition algorithms
@@ -221,7 +300,8 @@ terravector/
 │   │   ├── layers.py          # Overlay layer generators
 │   │   └── widgets.py         # Qt control widgets
 │   └── utils/
-│       └── io.py              # DEM loading, index persistence
+│       ├── io.py              # DEM loading, index persistence
+│       └── turing.py          # Gray-Scott amplifier for residuals signature
 ├── configs/                   # Signature configurations
 │   ├── default.yaml
 │   ├── classic.yaml
@@ -230,7 +310,7 @@ terravector/
 │   ├── residuals.yaml         # DIVERGE-style decomp × upsamp
 │   ├── spectral.yaml          # Directional FFT signatures
 │   └── spectral_hybrid.yaml   # Combined decomposition + FFT
-├── data/                      # Test data and outputs
+├── data/                      # Test data and outputs (corpus + checkpoints gitignored)
 ├── requirements.txt
 └── LICENSE                    # Apache 2.0
 ```
@@ -243,13 +323,28 @@ terravector/
 - matplotlib (visualization)
 - PyYAML (configuration)
 - gradio (web UI)
-- napari (desktop viewer - GPU-accelerated)
+- napari (desktop viewer — GPU-accelerated)
+- fastapi + uvicorn (REST API)
+- pyproj (WGS84 ↔ State Plane coordinate transforms)
 
 ## Inspiration
 
 This project was inspired by [centamori's HNSW implementation in PHP](https://github.com/centamiv/vektor) — the realization that HNSW's hierarchical navigation could work for terrain if "vectors" were decomposition signatures rather than text embeddings.
 
 The decomposition methods come from [RESIDUALS](https://github.com/bshepp/RESIDUALS), a framework for systematic feature detection in LiDAR DEMs.
+
+## Roadmap
+
+terravector is part of a layered architecture — see the full roadmap in [RESIDUALS](https://github.com/bshepp/RESIDUALS). The next steps for terravector specifically:
+
+1. **Index the Licking County corpus** — RESIDUALS is generating 200 cached DEM tiles with SVF, openness, and multi-scale TopHat. Build the HNSW index on this corpus (~1.7M patches).
+2. **QGIS plugin** — package the index + query pipeline as a GIS plugin ("Right-click → Find Similar Terrain").
+3. **Modernize the index backend** — evaluate FAISS or Qdrant as replacements for nmslib.
+4. **Recommendation API** — given a terrain patch, recommend the best decomposition method (see `docs/RESIDUALS_SERVICE_CONCEPT.md`).
+
+### Architecture Principle
+
+terravector is a pure algorithmic tool — no ML training required. Any future ML classifiers will sit as a separate layer that consumes terravector's index, not as a dependency within it.
 
 ## License
 
