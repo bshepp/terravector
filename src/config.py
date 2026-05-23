@@ -54,6 +54,28 @@ class ResidualsConfig:
     decomposition_params: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     upsampling_params: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
+    # Round-trip resampling parameters — previously hardcoded.
+    # down_factor and up_scale must be reciprocals for shapes to round-trip.
+    down_order: int = 1          # scipy.ndimage.zoom interpolation order on the way down
+    down_factor: float = 0.5     # zoom factor applied to the residual
+    up_scale: int = 2            # scale factor passed to the upsampler
+
+    # Bidirectional MTile metric: when True, also computes path B
+    # B(r) = down(up(r, up_scale), down_factor) and appends the
+    # analysis vector of (A - B) per pair.
+    bidirectional: bool = False
+
+    # Gray-Scott Turing intermediate stage: when True, the round-trip
+    # output of each path is passed through n_iter Gray-Scott steps
+    # before analysis. Amplifies subtle differences into distinct
+    # attractor textures.
+    turing_intermediate: bool = False
+    turing_iterations: int = 50
+    turing_Du: float = 0.16
+    turing_Dv: float = 0.08
+    turing_F: float = 0.035
+    turing_k: float = 0.060
+
 
 @dataclass
 class DirectionalFFTConfig:
@@ -121,10 +143,11 @@ class SignatureConfig:
             n_decomp = len(self.residuals.decomposition_methods)
             n_upsamp = len(self.residuals.upsampling_methods)
             n_combos = n_decomp * n_upsamp
-            if self.residuals.use_rich_analysis:
-                dim += n_combos * get_analysis_dim()  # 20 dims per combo
-            else:
-                dim += n_combos * 6  # 6 basic stats per combo
+            per_combo = get_analysis_dim() if self.residuals.use_rich_analysis else 6
+            # Path A (down→up) always contributes one slot per combo.
+            # Bidirectional adds a second slot per combo for the asymmetry analysis.
+            slots_per_combo = 2 if self.residuals.bidirectional else 1
+            dim += n_combos * slots_per_combo * per_combo
         
         if self.directional_fft.enabled:
             dim += get_directional_fft_dim(
@@ -158,6 +181,16 @@ class SignatureConfig:
                     'decomposition_methods': self.residuals.decomposition_methods,
                     'upsampling_methods': self.residuals.upsampling_methods,
                     'use_rich_analysis': self.residuals.use_rich_analysis,
+                    'down_order': self.residuals.down_order,
+                    'down_factor': self.residuals.down_factor,
+                    'up_scale': self.residuals.up_scale,
+                    'bidirectional': self.residuals.bidirectional,
+                    'turing_intermediate': self.residuals.turing_intermediate,
+                    'turing_iterations': self.residuals.turing_iterations,
+                    'turing_Du': self.residuals.turing_Du,
+                    'turing_Dv': self.residuals.turing_Dv,
+                    'turing_F': self.residuals.turing_F,
+                    'turing_k': self.residuals.turing_k,
                 },
                 'directional_fft': {
                     'enabled': self.directional_fft.enabled,
@@ -245,6 +278,30 @@ def parse_config(raw: Dict[str, Any]) -> SignatureConfig:
             config.residuals.upsampling_methods = residuals['upsampling_methods']
         if 'use_rich_analysis' in residuals:
             config.residuals.use_rich_analysis = residuals['use_rich_analysis']
+        if 'decomposition_params' in residuals:
+            config.residuals.decomposition_params = residuals['decomposition_params']
+        if 'upsampling_params' in residuals:
+            config.residuals.upsampling_params = residuals['upsampling_params']
+        if 'down_order' in residuals:
+            config.residuals.down_order = int(residuals['down_order'])
+        if 'down_factor' in residuals:
+            config.residuals.down_factor = float(residuals['down_factor'])
+        if 'up_scale' in residuals:
+            config.residuals.up_scale = int(residuals['up_scale'])
+        if 'bidirectional' in residuals:
+            config.residuals.bidirectional = bool(residuals['bidirectional'])
+        if 'turing_intermediate' in residuals:
+            config.residuals.turing_intermediate = bool(residuals['turing_intermediate'])
+        if 'turing_iterations' in residuals:
+            config.residuals.turing_iterations = int(residuals['turing_iterations'])
+        if 'turing_Du' in residuals:
+            config.residuals.turing_Du = float(residuals['turing_Du'])
+        if 'turing_Dv' in residuals:
+            config.residuals.turing_Dv = float(residuals['turing_Dv'])
+        if 'turing_F' in residuals:
+            config.residuals.turing_F = float(residuals['turing_F'])
+        if 'turing_k' in residuals:
+            config.residuals.turing_k = float(residuals['turing_k'])
     
     # Directional FFT config
     directional_fft = sig.get('directional_fft', {})
@@ -320,17 +377,36 @@ def validate_config(config: SignatureConfig) -> List[str]:
     if config.residuals.enabled:
         from .decomposition import list_decompositions
         from .upsampling import list_upsamplings
-        
+
         valid_decomp = list_decompositions()
         valid_upsamp = list_upsamplings()
-        
+
         for method in config.residuals.decomposition_methods:
             if method not in valid_decomp:
                 errors.append(f"Unknown residuals decomposition method: {method}")
-        
+
         for method in config.residuals.upsampling_methods:
             if method not in valid_upsamp:
                 errors.append(f"Unknown residuals upsampling method: {method}")
+
+        # Round-trip shape preservation: down_factor * up_scale must be ~1.
+        # Small fp tolerance because down_factor is a float.
+        rt = config.residuals.down_factor * config.residuals.up_scale
+        if abs(rt - 1.0) > 1e-6:
+            errors.append(
+                f"Residuals round-trip mismatch: down_factor ({config.residuals.down_factor}) "
+                f"* up_scale ({config.residuals.up_scale}) = {rt}, must equal 1"
+            )
+        if config.residuals.down_order < 0 or config.residuals.down_order > 5:
+            errors.append(
+                f"Residuals down_order must be in [0,5], got {config.residuals.down_order}"
+            )
+        if config.residuals.turing_intermediate:
+            if config.residuals.turing_iterations < 0:
+                errors.append(
+                    "Residuals turing_iterations must be non-negative, "
+                    f"got {config.residuals.turing_iterations}"
+                )
     
     # Validate directional FFT config
     if config.directional_fft.enabled:
