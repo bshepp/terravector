@@ -1,5 +1,17 @@
 # terravector signature configuration
 # Residuals: DIVERGE-style decomposition × upsampling combinations
+#
+# bidirectional=true adds a per-pair MTile asymmetry vector
+# computed from analyze_features(A - B), where:
+#   A = up(down(residual))    # the original path
+#   B = down(up(residual))    # the bidirectional counterpart
+# Doubles the residuals slice (16 pairs × 2 slots × 20 dims = 640d).
+# Empirical separability gain: +2% (vanilla 1.152 -> bidir 1.178) on the
+# 4-tile 400-patch production sweep. See data/separability/production_sweep.json.
+#
+# DIMENSION CHANGE: this preset now produces 640d embeddings instead of 320d.
+# Existing 320d indices remain readable with their saved signature_config,
+# but any new build with this preset will be incompatible with them.
 
 signature:
   decomposition:
@@ -28,7 +40,19 @@ signature:
     # Use rich analysis (20 dims) or basic stats (6 dims) per combination
     use_rich_analysis: true
 
-# 4 decomp × 4 upsamp = 16 combinations × 20 dims = 320 dimensions
+    # MTile asymmetry — landed after the separability sweep showed a
+    # consistent ~2% gain at ~2x compute cost. Default ON.
+    bidirectional: true
+
+    # Gray-Scott Turing intermediate stage — EXPERIMENTAL.
+    # The iteration sweep (data/separability/turing_sweep_*.json) showed
+    # iterating Gray-Scott destroys terrain signal faster than it creates
+    # it across every (F, k, iter) combination tested. Kept OFF by default.
+    # Use sweep_turing.py to re-explore on different data; do not enable
+    # for production index builds without re-running the sweep.
+    turing_intermediate: false
+
+# 4 decomp × 4 upsamp × 2 slots (A + bidirectional asymmetry) × 20 dims = 640 dimensions
 
 normalize: true
 space: cosinesimil

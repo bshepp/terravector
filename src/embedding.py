@@ -370,14 +370,15 @@ def compute_residuals_embedding(
             continue
 
         for upsamp_name in upsampling_methods:
+            # --- Path A: down then up. Always emits exactly one slot. ---
+            a_field = None
             try:
-                # --- Path A: down then up ---
                 a_down = zoom(residual, down_factor, order=down_order)
                 a_up = run_upsampling(
                     upsamp_name, a_down, scale=up_scale,
                     params=upsamp_params.get(upsamp_name),
                 )
-                # Crop to residual shape — required because zoom/zoom can
+                # Crop to residual shape — required because zoom can
                 # round dimensions independently. With down_factor*up_scale=1
                 # the mismatch is at most 1px per axis.
                 min_h = min(residual.shape[0], a_up.shape[0])
@@ -385,9 +386,15 @@ def compute_residuals_embedding(
                 a_up = a_up[:min_h, :min_w]
                 a_field = _maybe_turing(a_up)
                 embedding_parts.append(_analyze(a_field))
+            except Exception as exc:
+                embedding_parts.append(np.zeros(dim_per_slot, dtype=np.float32))
+                failed_pairs.append(f"{decomp_name}/{upsamp_name}:A:{type(exc).__name__}")
 
-                if bidirectional:
-                    # --- Path B: up then down ---
+            # --- Path B (only if bidirectional): always emits exactly one slot. ---
+            # Tracked separately from path A so a B-only failure doesn't
+            # double-count zeros against the A slot already emitted above.
+            if bidirectional:
+                try:
                     b_up = run_upsampling(
                         upsamp_name, residual, scale=up_scale,
                         params=upsamp_params.get(upsamp_name),
@@ -398,17 +405,22 @@ def compute_residuals_embedding(
                     b_down = b_down[:min_h, :min_w]
                     b_field = _maybe_turing(b_down)
 
-                    # Align A and B to common shape for difference.
-                    h = min(a_field.shape[0], b_field.shape[0])
-                    w = min(a_field.shape[1], b_field.shape[1])
-                    asymmetry = a_field[:h, :w] - b_field[:h, :w]
-                    embedding_parts.append(_analyze(asymmetry))
-
-            except Exception as exc:
-                embedding_parts.append(
-                    np.zeros(slots_per_pair * dim_per_slot, dtype=np.float32)
-                )
-                failed_pairs.append(f"{decomp_name}/{upsamp_name}:{type(exc).__name__}")
+                    if a_field is not None:
+                        h = min(a_field.shape[0], b_field.shape[0])
+                        w = min(a_field.shape[1], b_field.shape[1])
+                        asymmetry = a_field[:h, :w] - b_field[:h, :w]
+                        embedding_parts.append(_analyze(asymmetry))
+                    else:
+                        # A failed → can't compute A - B. Emit zeros.
+                        embedding_parts.append(np.zeros(dim_per_slot, dtype=np.float32))
+                        failed_pairs.append(
+                            f"{decomp_name}/{upsamp_name}:B:no_A_to_compare"
+                        )
+                except Exception as exc:
+                    embedding_parts.append(np.zeros(dim_per_slot, dtype=np.float32))
+                    failed_pairs.append(
+                        f"{decomp_name}/{upsamp_name}:B:{type(exc).__name__}"
+                    )
 
     embedding = np.concatenate(embedding_parts).astype(np.float32)
 

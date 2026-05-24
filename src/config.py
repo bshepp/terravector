@@ -62,13 +62,28 @@ class ResidualsConfig:
 
     # Bidirectional MTile metric: when True, also computes path B
     # B(r) = down(up(r, up_scale), down_factor) and appends the
-    # analysis vector of (A - B) per pair.
+    # analysis vector of (A - B) per pair. Default ON in configs/residuals.yaml
+    # after sweep evidence showed a consistent +2% separability gain at 2x cost.
     bidirectional: bool = False
 
-    # Gray-Scott Turing intermediate stage: when True, the round-trip
-    # output of each path is passed through n_iter Gray-Scott steps
-    # before analysis. Amplifies subtle differences into distinct
-    # attractor textures.
+    # ---- Gray-Scott Turing intermediate stage — EXPERIMENTAL ---------------
+    # Inserts n_iter Gray-Scott reaction-diffusion steps between the round-trip
+    # and analyze_features. The hypothesis: pattern formation amplifies subtle
+    # seed differences into discretely different attractor textures.
+    #
+    # Current status (see data/separability/turing_sweep_*.json):
+    #   - Iterating Gray-Scott on the round-trip output degrades separability
+    #     across every (iter, F, k) combination tested on the Licking County
+    #     corpus. Kept OFF by default everywhere.
+    #   - The kept-zero-iterations case (turing_intermediate=True,
+    #     turing_iterations=0) gave a small bump, but that is range
+    #     normalization, not reaction-diffusion — track separately.
+    #
+    # Not deprecated. The exploration is open: different seeds (e.g. gradient
+    # field rather than residual), different reaction-diffusion systems
+    # (FitzHugh-Nagumo, Brusselator), or different consumers (compare patterns
+    # via image-similarity rather than analyze_features) may still pay off.
+    # Use sweep_turing.py to re-test before re-enabling.
     turing_intermediate: bool = False
     turing_iterations: int = 50
     turing_Du: float = 0.16

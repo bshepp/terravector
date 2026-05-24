@@ -26,6 +26,7 @@ python cli.py info terrain.idx
 # Full-county corpus build (long-running, checkpointed per tile)
 python build_county_index.py --resume
 python build_county_index.py --dry-run
+python build_county_index.py --max-tiles 3   # validation subset (~25 min)
 
 # UIs
 python app.py                          # Gradio web UI → http://127.0.0.1:7860
@@ -50,7 +51,7 @@ The core abstraction is `SignatureConfig` (`src/config.py`). It toggles five ind
 1. **Decomposition** — signal-decomposition residual stats (6 stats × N methods). Original method. See `src/decomposition/`.
 2. **Geomorphometric** — classic GIS derivatives (slope, aspect, curvature, TPI, TRI, roughness). 6 stats × N features.
 3. **Texture** — GLCM + LBP.
-4. **Residuals** — DIVERGE-style decomposition × upsampling Cartesian product. For each (decomp, upsamp) pair: decompose → downsample residual (path A) → upsample back → compute rich 20-dim analysis. Dimension = n_decomp × n_upsamp × slots_per_pair × 20. Default is 320-d (4×4 grid, one slot per pair) — this is what `build_county_index.py` uses. Two optional amplification stages: `bidirectional` adds a second slot per pair carrying the (A − B) asymmetry vector, doubling the slice; `turing_intermediate` passes the round-trip output through Gray-Scott reaction-diffusion before analysis (`src/utils/turing.py`). See `compare_separability.py` for the within/across-tile separability sweep that measures whether either amplification is worth its compute cost on your corpus.
+4. **Residuals** — DIVERGE-style decomposition × upsampling Cartesian product. For each (decomp, upsamp) pair: decompose → downsample residual (path A) → upsample back → compute rich 20-dim analysis. Dimension = n_decomp × n_upsamp × slots_per_pair × 20. The shipped `configs/residuals.yaml` defaults to **640-d** (4×4 grid × 2 slots per pair: path A + bidirectional asymmetry). Two optional amplification stages live here: `bidirectional` (default ON, +2% separability at 2× cost) appends a second slot per pair carrying the (A − B) asymmetry vector; `turing_intermediate` (default OFF, experimental) passes the round-trip output through Gray-Scott reaction-diffusion before analysis (`src/utils/turing.py`). Use `compare_separability.py` for a full within/across-tile separability sweep and `sweep_turing.py` for Turing-specific iteration/Pearson-(F,k)-grid sweeps. The sweep evidence for the current defaults lives in `data/separability/*.json`.
 5. **Directional FFT** — 2D FFT sampled at angles for oriented feature detection.
 
 `compute_embedding_from_config()` in `src/embedding.py` concatenates enabled slices in the fixed order above. **Adding a signature family means: add a `@dataclass` config block, a branch in `compute_embedding_from_config`, a dim contribution in `SignatureConfig.get_total_dim`, validation in `validate_config`, and parsing in `parse_config`.** Presets are built in `_create_presets()` in `src/config.py` and mirrored by YAML files in `configs/`.
@@ -77,8 +78,10 @@ Embeddings are z-score normalized at index build time; the per-dimension mean/st
 
 ## Things to watch for
 
-- **Signature config ordering is load-bearing.** The concatenation order in `compute_embedding_from_config` defines the meaning of each dimension. Changing it silently invalidates existing indices — users have no way to detect the mismatch beyond degraded query quality.
-- **County index is ~1 GB+ in memory.** 871K patches × 320 dims × 4 bytes ≈ 1.1 GB just for embeddings. Be deliberate with copies.
+- **Signature config ordering is load-bearing.** The concatenation order in `compute_embedding_from_config` defines the meaning of each dimension. Changing it silently invalidates existing indices — users have no way to detect the mismatch beyond degraded query quality. The dim change from 320 → 640 when bidirectional was enabled by default is exactly this hazard: 320-d indices remain readable via their stored `signature_config`, but a fresh build with the current `residuals.yaml` is not query-compatible with them.
+- **County index is ~2 GB+ in memory.** 871K patches × 640 dims × 4 bytes ≈ 2.2 GB just for embeddings (was 1.1 GB at the old 320-d default). Be deliberate with copies.
+- **Per-tile audit sidecars.** `build_county_index.py` writes `{tile_id}_diagnostics.json` next to each checkpoint, recording any (decomp, upsamp, path) pairs that silently failed and were zero-filled in the embedding. The final `corpus.json` carries a `diagnostics` block rolling these up across tiles. Use them to spot e.g. edge-tile failure clusters (gaussian + zoom-based upsamplers on NaN-poisoned patches is a known one).
 - **Index files are gitignored** (`data/*.idx`, `data/*.npy`). Don't commit them. `data/similar_patches.png` is the one allowed artifact (README example).
 - **Windows paths in `build_county_index.py`** are hardcoded absolute (`F:\science-projects\...`). If refactoring for portability, those constants are the blocker.
 - **nmslib is on the roadmap to be replaced** (FAISS or Qdrant). Keep `src/index.py` as the isolation layer — callers should only touch `TerrainIndex`, not `nmslib` directly.
+- **Turing branch is paused, not closed.** `sweep_turing.py` proved that iterating Gray-Scott on `(residual A) round-trip` output degrades terrain separability at every (iter, F, k) tested. The amplification idea is still open via different seeds, different reaction-diffusion systems, or different consumers — re-test with `sweep_turing.py` before re-enabling in any preset.

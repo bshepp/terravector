@@ -147,6 +147,10 @@ def main():
     parser.add_argument("--output", default=str(OUTPUT_DIR / "licking_county.idx"))
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoints")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without processing")
+    parser.add_argument(
+        "--max-tiles", type=int, default=None,
+        help="Process at most N tiles (for validation runs). Default: all tiles.",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -155,10 +159,17 @@ def main():
 
     county_meta = load_county_metadata(COUNTY_TILES_DIR)
     tile_ids = county_meta["processed_tile_ids"]
+    if args.max_tiles is not None and args.max_tiles > 0:
+        tile_ids = tile_ids[: args.max_tiles]
     n_tiles = len(tile_ids)
 
     print(f"\n  Source:     {COUNTY_TILES_DIR}")
-    print(f"  Tiles:      {n_tiles} ({county_meta['grid_rows']}×{county_meta['grid_cols']} grid)")
+    if args.max_tiles is not None:
+        print(f"  Tiles:      {n_tiles} (validation subset; full county = "
+              f"{len(county_meta['processed_tile_ids'])})")
+    else:
+        print(f"  Tiles:      {n_tiles} "
+              f"({county_meta['grid_rows']}×{county_meta['grid_cols']} grid)")
     print(f"  Resolution: {county_meta['resolution_ft']} ft/px")
     print(f"  CRS:        {county_meta['crs']}")
     print(f"  Config:     {CONFIG_PATH}")

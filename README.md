@@ -144,29 +144,39 @@ Frequency analysis at multiple angles through the 2D FFT:
 | `texture` | Texture only | 16 | Surface pattern matching |
 | `hybrid` | All three | 88 | Maximum discrimination |
 | `minimal` | Reduced decomp + geomorph | 24 | Fast computation |
-| `residuals` | Decomp × Upsamp + Analysis | 320 | DIVERGE-style rich features |
+| `residuals` | Decomp × Upsamp + Analysis (bidirectional) | 640 | DIVERGE-style rich features w/ MTile asymmetry |
 | `spectral` | Directional FFT (8 angles) | 48 | Oriented feature detection |
 | `spectral_hybrid` | Decomposition + FFT | 60 | Combined spatial + spectral |
 
-### Residuals signature: optional amplification stages
+### Residuals signature: amplification stages
 
-The `residuals` family supports two experimental stages on top of the base
-decomposition × upsampling grid. Both are off by default and toggled via
-the `residuals:` section in the YAML config (see `src/config.py` for full param list):
+The `residuals` family supports two amplification stages on top of the base
+decomposition × upsampling grid. Both are toggled via the `residuals:`
+section in the YAML config (see `src/config.py` for full param list):
 
-- **`bidirectional: true`** — for each (decomp, upsamp) pair, also compute
-  the reverse path (up then down) and emit the analysis of the (A − B)
-  asymmetry as an extra slot. Doubles the residuals slice (320 → 640 d
-  on the default 4×4 grid).
-- **`turing_intermediate: true`** — pass each round-trip output through
-  `turing_iterations` Gray-Scott reaction-diffusion steps before analysis.
-  Subtle textural differences settle into discretely different attractor
-  patterns, improving downstream HNSW separability at a compute cost.
+- **`bidirectional: true`** *(default ON in `configs/residuals.yaml`)* — for
+  each (decomp, upsamp) pair, also compute the reverse path (up then down)
+  and emit the analysis of the (A − B) asymmetry as an extra slot. Doubles
+  the residuals slice (320 → 640 d on the default 4×4 grid). Sweep evidence
+  showed a consistent +2% within/across-tile separability gain at ~2× cost.
+- **`turing_intermediate: true`** *(default OFF — experimental)* — pass each
+  round-trip output through `turing_iterations` Gray-Scott reaction-diffusion
+  steps before analysis. The hypothesis: pattern formation amplifies subtle
+  seed differences into discretely different attractor textures. The
+  iteration and Pearson (F, k) sweeps so far show iterating Gray-Scott on
+  the round-trip output *degrades* terrain separability across every
+  parameter cell tested on the Licking County corpus. Branch is paused, not
+  closed — re-test with different seeds, alternative reaction-diffusion
+  systems, or different downstream consumers via `sweep_turing.py` before
+  re-enabling in production.
 
-Run `python compare_separability.py` to sweep these variants against the
-vanilla residuals signature and measure within-tile vs across-tile cosine
-distance — i.e. whether the amplification actually pulls similar terrain
-together and pushes dissimilar terrain apart.
+Sweep tools:
+- `python compare_separability.py` — within/across-tile cosine distance
+  across `{vanilla, +bidirectional, +turing, +both}` variants.
+- `python sweep_turing.py` — Turing-specific sweeps: iteration count
+  (`--mode iterations`), Pearson (F, k) grid (`--mode fk-grid`), or both.
+
+Output JSON in `data/separability/` is gitignored.
 
 ### Custom Configuration
 
@@ -248,6 +258,7 @@ sibling project's 200 cached county tiles into a single unified HNSW index
 python build_county_index.py --dry-run    # plan only
 python build_county_index.py              # full build (~hours)
 python build_county_index.py --resume     # skip already-checkpointed tiles
+python build_county_index.py --max-tiles 3   # validate the pipeline on a small subset first
 ```
 
 The build is **checkpointed per tile** under `data/licking_county/checkpoints/`
@@ -271,6 +282,7 @@ terravector/
 ├── cli.py                     # Command-line interface
 ├── build_county_index.py      # Licking County corpus pipeline (checkpointed)
 ├── compare_separability.py    # Sweep residuals signature variants
+├── sweep_turing.py            # Turing iteration / Pearson (F,k) grid sweeps
 ├── check_coords.py            # Quick "is this point in the corpus?" check
 ├── src/
 │   ├── config.py              # YAML config parsing
