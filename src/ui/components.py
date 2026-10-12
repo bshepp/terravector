@@ -235,38 +235,3 @@ def create_placeholder_image(
         pass
     
     return img
-
-
-def coords_from_click(
-    evt_data: Dict,
-    dem_shape: Tuple[int, int],
-    display_size: Tuple[int, int]
-) -> Tuple[int, int]:
-    """
-    Convert click coordinates from display space to DEM space.
-    
-    Args:
-        evt_data: Gradio event data with x, y coordinates
-        dem_shape: (height, width) of DEM
-        display_size: (height, width) of displayed image
-        
-    Returns:
-        (y, x) in DEM coordinates
-    """
-    # Get click coordinates
-    click_x = evt_data.get('x', 0)
-    click_y = evt_data.get('y', 0)
-    
-    # Scale to DEM coordinates
-    scale_y = dem_shape[0] / display_size[0]
-    scale_x = dem_shape[1] / display_size[1]
-    
-    dem_y = int(click_y * scale_y)
-    dem_x = int(click_x * scale_x)
-    
-    # Clamp to valid range
-    dem_y = max(0, min(dem_y, dem_shape[0] - 1))
-    dem_x = max(0, min(dem_x, dem_shape[1] - 1))
-    
-    return dem_y, dem_x
-

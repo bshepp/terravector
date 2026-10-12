@@ -114,19 +114,13 @@ def query_click(evt: gr.SelectData, k_results: int):
     if state.dem is None:
         return None, gr.update(), "No DEM loaded"
     
-    # evt.index gives [y, x] in the displayed image coordinates
-    # We need to scale from display space to DEM space
-    click_y, click_x = evt.index[0], evt.index[1]
-    
-    # The image is displayed at height=500, width scales proportionally
+    # Gradio's Image.select reports evt.index as [x, y] already scaled to the
+    # image's natural pixel size (the frontend multiplies by
+    # naturalWidth / displayed width), so no display-space rescaling here.
+    click_x, click_y = int(evt.index[0]), int(evt.index[1])
     dem_h, dem_w = state.dem.shape[:2]
-    display_h = 500
-    display_w = int(500 * dem_w / dem_h)
-    
-    # Scale click coordinates to DEM coordinates
-    y = int(click_y * dem_h / display_h)
-    x = int(click_x * dem_w / display_w)
-    
+    y, x = click_y, click_x
+
     # Clamp to valid range
     y = max(0, min(y, dem_h - 1))
     x = max(0, min(x, dem_w - 1))

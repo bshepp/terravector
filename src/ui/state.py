@@ -77,18 +77,41 @@ class AppState:
             self.index = TerrainIndex.load(str(path))
             self.index_path = str(path)
             
-            # Try to load the source DEM
+            # Try to load the source DEM. Any previously loaded DEM is dropped
+            # either way: keeping it would render result patches from the
+            # wrong raster.
             sample_meta = next(iter(self.index.metadata.values()), {})
             dem_path = sample_meta.get('dem_path')
-            
+            warnings = []
+
+            self.dem = None
+            self.dem_path = None
+            self.dem_info = None
             if dem_path and Path(dem_path).exists():
                 self.dem = load_dem(dem_path)
                 self.dem_path = dem_path
                 self.dem_info = get_dem_info(self.dem)
-                self.patch_size = sample_meta.get('patch_size', 64)
-            
+                self.patch_size = sample_meta.get(
+                    'patch_size', sample_meta.get('shape', (self.patch_size,))[0]
+                )
+            else:
+                warnings.append(
+                    f"source DEM not found ({dem_path or 'no dem_path in metadata'}); "
+                    "load a DEM to see patch images"
+                )
+
+            if 'tile_id' in sample_meta:
+                warnings.append(
+                    "this is a multi-tile county index; only the first tile's DEM is "
+                    "loaded, so patch images from other tiles will not render. "
+                    "Use the REST API or the similarity raster for county queries"
+                )
+
             stats = self.index.get_stats()
-            return f"Loaded index: {stats['n_patches']} patches, dim={stats['embedding_dim']}"
+            msg = f"Loaded index: {stats['n_patches']} patches, dim={stats['embedding_dim']}"
+            if warnings:
+                msg += "\nWarning: " + "; ".join(warnings)
+            return msg
         except Exception as e:
             return f"Error loading index: {str(e)}"
     

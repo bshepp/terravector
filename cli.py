@@ -7,6 +7,7 @@ Command-line interface for terrain similarity search.
 Usage:
     python cli.py build <dem_path> --patch-size 64 --output terrain.idx
     python cli.py build <dem_path> --config signature.yaml --output terrain.idx
+    python cli.py build <dem_path> --config residuals --output terrain.idx   # any preset in src.config.PRESETS
     python cli.py query <index_path> --patch 42 --k 10
     python cli.py query <index_path> --patch 42 --k 10 --dem <dem_path> --visualize results.png
     python cli.py info <index_path>
@@ -32,6 +33,7 @@ from src.config import (
     load_config,
     get_default_config,
     get_preset,
+    PRESETS,
     validate_config,
     SignatureConfig,
 )
@@ -82,11 +84,14 @@ def cmd_build(args):
         dem,
         patch_size=args.patch_size,
         overlap=args.overlap,
-        min_valid_fraction=args.min_valid
+        min_valid_fraction=args.min_valid,
+        min_range=args.min_range,
     )
     
     tiling_info = get_tiling_info(dem.shape, args.patch_size, args.overlap)
-    print(f"  Generated {len(patches)} patches ({tiling_info['n_rows']}x{tiling_info['n_cols']} grid)")
+    n_grid = tiling_info['n_rows'] * tiling_info['n_cols']
+    print(f"  Generated {len(patches)} patches from a {tiling_info['n_rows']}x{tiling_info['n_cols']} grid "
+          f"({n_grid - len(patches)} dropped as nodata/constant)")
     
     if len(patches) == 0:
         print("Error: No valid patches found")
@@ -269,24 +274,23 @@ def cmd_info(args):
         sig = index.signature_config.get('signature', {})
         print("\nSignature Configuration:")
         print("-" * 40)
-        
-        # Decomposition
-        decomp = sig.get('decomposition', {})
-        if decomp.get('enabled', False):
-            methods = decomp.get('methods', [])
-            print(f"  Decomposition: {', '.join(methods)}")
-        
-        # Geomorphometric
-        geomorph = sig.get('geomorphometric', {})
-        if geomorph.get('enabled', False):
-            features = geomorph.get('features', [])
-            print(f"  Geomorphometric: {', '.join(features)}")
-        
-        # Texture
-        texture = sig.get('texture', {})
-        if texture.get('enabled', False):
-            features = texture.get('features', [])
-            print(f"  Texture: {', '.join(features)}")
+
+        # One line per enabled family, in slice order, listing every setting
+        # that shapes the slice (anything but the 'enabled' flag and the
+        # free-form 'params' dict). Covers families added after this printer
+        # was written (residuals, directional_fft) without further edits.
+        for family, block in sig.items():
+            if not isinstance(block, dict) or not block.get('enabled', False):
+                continue
+            parts = []
+            for key, val in block.items():
+                if key in ('enabled', 'params'):
+                    continue
+                if isinstance(val, (list, tuple)):
+                    val = ', '.join(str(v) for v in val)
+                parts.append(f"{key}={val}")
+            print(f"  {family}: " + '; '.join(parts))
+        print(f"  Total dim: {index.dim}")
     else:
         print("\nSignature: decomposition (default)")
     
@@ -324,10 +328,12 @@ def main():
     build_parser = subparsers.add_parser('build', help='Build index from DEM')
     build_parser.add_argument('dem_path', help='Path to DEM file (.npy or .tif)')
     build_parser.add_argument('--output', '-o', required=True, help='Output index path')
-    build_parser.add_argument('--config', '-c', help='Signature config file (YAML) or preset name (default, classic, texture, hybrid, minimal)')
+    build_parser.add_argument('--config', '-c', help=f"Signature config file (YAML) or preset name ({', '.join(PRESETS)})")
     build_parser.add_argument('--patch-size', type=int, default=64, help='Patch size (default: 64)')
     build_parser.add_argument('--overlap', type=int, default=0, help='Patch overlap (default: 0)')
     build_parser.add_argument('--min-valid', type=float, default=0.8, help='Min valid pixel fraction (default: 0.8)')
+    build_parser.add_argument('--min-range', type=float, default=1e-6,
+                              help='Drop patches whose elevation range is below this (constant nodata fill); 0 disables (default: 1e-6)')
     build_parser.add_argument('--space', default='cosinesimil', choices=['cosinesimil', 'l2', 'l1'], help='Distance metric')
     build_parser.add_argument('--M', type=int, default=16, help='HNSW M parameter')
     build_parser.add_argument('--no-normalize', action='store_true', help='Skip embedding normalization')
