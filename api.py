@@ -138,7 +138,10 @@ _raster: Optional[SimilarityRaster] = None
 # transient allocation. The handlers are sync so they run in the threadpool
 # instead of blocking the event loop; this cap keeps a burst of requests from
 # stacking scans (BLAS is already multithreaded, so concurrency buys nothing).
+# Waiters are bounded too: past RASTER_QUEUE_TIMEOUT_S they get a 503 instead
+# of holding a threadpool thread, so a flood cannot starve other handlers.
 _raster_slots = threading.BoundedSemaphore(2)
+RASTER_QUEUE_TIMEOUT_S = float(os.environ.get("TERRAVECTOR_RASTER_QUEUE_TIMEOUT", "5"))
 
 
 def _load():
@@ -228,13 +231,21 @@ def _resolve_query_patch(
 
 
 def _similarity_raster_response(patch_id: int, value: str) -> Response:
-    with _raster_slots:
+    if not _raster_slots.acquire(timeout=RASTER_QUEUE_TIMEOUT_S):
+        raise HTTPException(
+            status_code=503,
+            detail="Similarity raster is busy; retry shortly.",
+            headers={"Retry-After": "2"},
+        )
+    try:
         grid = _raster.raster(patch_id, value=value)
         body = _raster.to_geotiff_bytes(
             grid,
             tags={"TERRAVECTOR_QUERY_PATCH_ID": str(patch_id), "TERRAVECTOR_VALUE": value},
         )
         del grid
+    finally:
+        _raster_slots.release()
     return Response(
         content=body,
         media_type="image/tiff",
