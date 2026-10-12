@@ -31,7 +31,8 @@ def tile_dem(
     patch_size: int = 64,
     overlap: int = 0,
     min_valid_fraction: float = 0.8,
-    pad_partial: bool = True
+    pad_partial: bool = True,
+    min_range: float = 1e-6,
 ) -> List[Patch]:
     """
     Divide a DEM into patches.
@@ -42,6 +43,12 @@ def tile_dem(
         overlap: Number of pixels to overlap between patches
         min_valid_fraction: Minimum fraction of non-NaN pixels required
         pad_partial: If True, pad edge patches to full size; if False, skip them
+        min_range: Minimum elevation range (max - min over valid pixels) a
+            patch must have to be kept. Constant-valued patches are nodata
+            fill (the county tiles write edges as a flat constant rather than
+            NaN); they carry no terrain signal, embed as near-zero vectors,
+            and their ~1e-13 residual noise makes the histogram-based
+            feature analysis raise on spline upsamplers. Set to 0 to disable.
         
     Returns:
         List of Patch objects
@@ -78,6 +85,11 @@ def tile_dem(
             valid_fraction = 1.0 - (np.isnan(patch_data).sum() / patch_data.size)
             if valid_fraction < min_valid_fraction:
                 continue
+
+            # Check for constant-valued (nodata fill) patches
+            if min_range > 0 and valid_fraction > 0:
+                if (np.nanmax(patch_data) - np.nanmin(patch_data)) < min_range:
+                    continue
             
             # Pad if necessary
             if pad_partial and patch_data.shape != (patch_size, patch_size):

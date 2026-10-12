@@ -200,7 +200,14 @@ def analyze_frequency_content(arr: np.ndarray) -> Dict[str, float]:
 
 def compute_feature_snr(arr: np.ndarray, percentile: float = 95) -> float:
     """
-    Compute signal-to-noise ratio for features.
+    Compute log-scaled signal-to-noise ratio for features.
+
+    Returns log1p(std(signal) / std(noise)), where "signal" is the top
+    ``percentile`` of |arr| and "noise" is the rest. The raw ratio is
+    unbounded: on near-flat residuals the noise std approaches zero and the
+    ratio reaches 1e15, which dominates z-score normalization and effectively
+    zeroes the dimension for every other patch. log1p keeps it monotonic,
+    bounded (~36 at 1e15), and 0 for the degenerate cases below.
     """
     threshold = np.percentile(np.abs(arr), percentile)
     
@@ -215,7 +222,7 @@ def compute_feature_snr(arr: np.ndarray, percentile: float = 95) -> float:
     if noise_std == 0:
         return 0.0
     
-    return float(np.std(signal_values) / noise_std)
+    return float(np.log1p(np.std(signal_values) / noise_std))
 
 
 def analysis_to_vector(analysis: Dict[str, float]) -> np.ndarray:
@@ -255,6 +262,6 @@ def get_analysis_labels() -> List[str]:
         'energy', 'entropy', 'spatial_autocorr',
         'linear_count', 'linear_max', 'linear_mean',
         'freq_low', 'freq_mid', 'freq_high', 'freq_ratio',
-        'snr', 'min', 'max', 'reserved'
+        'log_snr', 'min', 'max', 'reserved'
     ]
 

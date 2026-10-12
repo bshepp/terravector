@@ -1,4 +1,7 @@
 numpy>=1.20.0
+# Decomposition + upsampling methods come from the RESIDUALS sibling project.
+# For local development: pip install -e F:/science-projects/RESIDUALS
+residuals @ git+https://github.com/bshepp/RESIDUALS.git@v0.2.0
 scipy>=1.7.0
 scikit-image>=0.18.0
 PyWavelets>=1.1.0

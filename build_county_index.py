@@ -287,6 +287,20 @@ def main():
         embeddings, metadata, tile_shape = load_checkpoint(tile_id)
         n_local = len(metadata)
 
+        # Tiles checkpointed by an earlier run (--resume) or by a helper
+        # process were not seen in Phase 1; pick up their diagnostics from
+        # the sidecar so the corpus.json rollup covers every indexed tile.
+        if tile_id not in diagnostics_by_tile:
+            diag_path = CHECKPOINT_DIR / f"{tile_id}_diagnostics.json"
+            if diag_path.exists():
+                with open(diag_path) as f:
+                    diag = json.load(f)
+                diagnostics_by_tile[tile_id] = {
+                    "n_patches": diag["n_patches"],
+                    "n_patches_with_failures": diag["n_patches_with_failures"],
+                    "total_failed_pairs": diag["total_failed_pairs"],
+                }
+
         # Remap local patch IDs to global IDs
         for local_id in sorted(metadata.keys()):
             meta = metadata[local_id]

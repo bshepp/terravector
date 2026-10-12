@@ -493,6 +493,9 @@ def _create_presets():
         'bicubic', 'lanczos', 'bspline', 'fft_zeropad'
     ]
     residuals.residuals.use_rich_analysis = True
+    # Mirror configs/residuals.yaml: bidirectional landed as the default
+    # (640-d) after the production separability sweep.
+    residuals.residuals.bidirectional = True
     PRESETS['residuals'] = residuals
     
     # Residuals-extended: more methods for comprehensive coverage

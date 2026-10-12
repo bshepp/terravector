@@ -22,6 +22,15 @@ cd terravector
 pip install -r requirements.txt
 ```
 
+The decomposition and upsampling methods are provided by the
+[`residuals`](https://github.com/bshepp/RESIDUALS) package (pinned to a release
+tag in `requirements.txt`). If you have a local RESIDUALS checkout, install it
+editable instead so both projects track the same code:
+
+```bash
+pip install -e ../RESIDUALS
+```
+
 ## Quick Start
 
 ### Desktop Viewer (Recommended for Scientists)
@@ -252,7 +261,8 @@ python check_coords.py --lat 40.0279 --lon -82.4590 \
 
 `build_county_index.py` is the production pipeline that turns the RESIDUALS
 sibling project's 200 cached county tiles into a single unified HNSW index
-(~870K patches at the default `residuals` preset).
+(858,642 patches at the default `residuals` preset; first full build
+completed 2026-10-11).
 
 ```bash
 python build_county_index.py --dry-run    # plan only
@@ -268,6 +278,22 @@ during embedding, and the final `*.corpus.json` rolls those failures up
 across tiles — useful for spotting a decomposition method that's broken
 in production before the index is opaque.
 
+The embedding pass is single-threaded (~15 min per tile). To use idle cores,
+run `county_worker.py` alongside the main build: each worker takes a disjoint
+stride of tiles from the back of the list and writes the same checkpoints, so
+the main process finds them done and skips straight to assembly. See the
+module docstring for the exact invocation.
+
+```bash
+python -u build_county_index.py --resume > build.log
+python -u county_worker.py --worker-id 0 --n-workers 8 --main-log build.log   # x8
+```
+
+Tiles are filtered for constant-valued (nodata-fill) patches at tiling time,
+and the SNR feature of the rich analysis vector is log-scaled; both are
+index-compatibility events, so indices built before 2026-10-11 are not
+query-compatible with the current code.
+
 The path constants at the top of `build_county_index.py` are currently
 hardcoded for a Windows workstation; if you're running elsewhere, edit
 `COUNTY_TILES_DIR`, `OUTPUT_DIR`, and `CONFIG_PATH`.
@@ -281,6 +307,7 @@ terravector/
 ├── viewer.py                  # Napari desktop viewer
 ├── cli.py                     # Command-line interface
 ├── build_county_index.py      # Licking County corpus pipeline (checkpointed)
+├── county_worker.py           # Parallel helper for the county build
 ├── compare_separability.py    # Sweep residuals signature variants
 ├── sweep_turing.py            # Turing iteration / Pearson (F,k) grid sweeps
 ├── check_coords.py            # Quick "is this point in the corpus?" check
@@ -288,14 +315,8 @@ terravector/
 │   ├── config.py              # YAML config parsing
 │   ├── coords.py              # WGS84 ↔ State Plane ↔ patch ID bridge
 │   ├── tiling.py              # DEM → patches
-│   ├── decomposition/         # Signal decomposition methods
-│   │   ├── methods.py         # Core decomposition algorithms
-│   │   ├── methods_extended.py # Extended methods (from DIVERGE)
-│   │   └── registry.py        # Method registration system
-│   ├── upsampling/            # Resolution upsampling methods
-│   │   ├── methods.py         # Core upsampling algorithms
-│   │   ├── methods_extended.py # Extended methods
-│   │   └── registry.py        # Method registration system
+│   ├── decomposition/         # Facade over residuals.decomposition (RESIDUALS)
+│   ├── upsampling/            # Facade over residuals.upsampling (RESIDUALS)
 │   ├── features/              # Feature extractors
 │   │   ├── geomorphometric.py # Slope, curvature, TPI, etc.
 │   │   ├── texture.py         # GLCM, LBP
@@ -343,13 +364,13 @@ terravector/
 
 This project was inspired by [centamori's HNSW implementation in PHP](https://github.com/centamiv/vektor) — the realization that HNSW's hierarchical navigation could work for terrain if "vectors" were decomposition signatures rather than text embeddings.
 
-The decomposition methods come from [RESIDUALS](https://github.com/bshepp/RESIDUALS), a framework for systematic feature detection in LiDAR DEMs.
+The decomposition and upsampling methods are imported from [RESIDUALS](https://github.com/bshepp/RESIDUALS), a framework for systematic feature detection in LiDAR DEMs. To add a method, register it there and terravector picks it up automatically.
 
 ## Roadmap
 
 terravector is part of a layered architecture — see the full roadmap in [RESIDUALS](https://github.com/bshepp/RESIDUALS). The next steps for terravector specifically:
 
-1. **Index the Licking County corpus** — RESIDUALS is generating 200 cached DEM tiles with SVF, openness, and multi-scale TopHat. Build the HNSW index on this corpus (~1.7M patches).
+1. **Index the Licking County corpus** — done. RESIDUALS produced 200 cached DEM tiles (February 2026) and the full HNSW index was built on 2026-10-11: 858,642 patches at 64×64, 640-d, zero embedding failures. Next is exercising it through the REST API and UIs at county scale.
 2. **QGIS plugin** — package the index + query pipeline as a GIS plugin ("Right-click → Find Similar Terrain").
 3. **Modernize the index backend** — evaluate FAISS or Qdrant as replacements for nmslib.
 4. **Recommendation API** — given a terrain patch, recommend the best decomposition method (see `docs/RESIDUALS_SERVICE_CONCEPT.md`).

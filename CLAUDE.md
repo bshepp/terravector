@@ -8,11 +8,11 @@ terravector converts Digital Elevation Models (DEMs) into searchable vector embe
 
 This is an exploratory WIP project. Expect rough edges and evolving APIs.
 
-Sibling project: **RESIDUALS** at `F:\science-projects\RESIDUALS` produces the county-tile DEM corpus that `build_county_index.py` consumes. Decomposition and upsampling methods here are ports from DIVERGE/RESIDUALS.
+Sibling project: **RESIDUALS** at `F:\science-projects\RESIDUALS` produces the county-tile DEM corpus that `build_county_index.py` consumes, and is also a **runtime dependency**: the `residuals` package supplies every decomposition and upsampling method. `src/decomposition/` and `src/upsampling/` are thin facades that re-export from it. Locally it is installed editable (`pip install -e F:\science-projects\RESIDUALS`); `requirements.txt` pins a release tag for everyone else.
 
 ## Common commands
 
-There is **no test suite** and no linter configured. Development is run-and-inspect. Install with `pip install -r requirements.txt`.
+There is **no test suite** and no linter configured. Development is run-and-inspect. Install with `pip install -r requirements.txt` (plus `pip install -e ../RESIDUALS` for a local RESIDUALS checkout).
 
 Main entry points are top-level scripts, each with `--help`:
 
@@ -27,6 +27,8 @@ python cli.py info terrain.idx
 python build_county_index.py --resume
 python build_county_index.py --dry-run
 python build_county_index.py --max-tiles 3   # validation subset (~25 min)
+# Parallel helper: run N of these alongside the main build (see its docstring)
+python -u county_worker.py --worker-id 0 --n-workers 8 --main-log build.log
 
 # UIs
 python app.py                          # Gradio web UI → http://127.0.0.1:7860
@@ -38,7 +40,7 @@ uvicorn api:app --reload --host 127.0.0.1 --port 8000
 TERRAVECTOR_INDEX=path/to/licking_county.idx uvicorn api:app
 ```
 
-`build_county_index.py` writes per-tile `.npz` checkpoints under `data/licking_county/checkpoints/` and is safe to interrupt. `--resume` skips already-checkpointed tiles. The final index is a single unified HNSW across all ~871K patches (4224×4224 tiles × 66×66 patches each at patch_size=64).
+`build_county_index.py` writes per-tile `.npz` checkpoints under `data/licking_county/checkpoints/` and is safe to interrupt. `--resume` skips already-checkpointed tiles. The final index is a single unified HNSW across all 858,642 patches (200 tiles × up to 66×66 patches each at patch_size=64, after dropping nodata and constant-fill patches). The embedding pass is single-threaded at ~15 min/tile; `county_worker.py` fills idle cores and writes the same checkpoints.
 
 ## Architecture
 
@@ -48,7 +50,7 @@ The pipeline is **DEM → patches → per-patch embedding → HNSW index → sim
 
 The core abstraction is `SignatureConfig` (`src/config.py`). It toggles five independent signature families, each contributing a slice of the final feature vector:
 
-1. **Decomposition** — signal-decomposition residual stats (6 stats × N methods). Original method. See `src/decomposition/`.
+1. **Decomposition** — signal-decomposition residual stats (6 stats × N methods). Original method. Uses the six legacy core methods pinned in `src/decomposition/__init__.py`; their order defines the slice layout.
 2. **Geomorphometric** — classic GIS derivatives (slope, aspect, curvature, TPI, TRI, roughness). 6 stats × N features.
 3. **Texture** — GLCM + LBP.
 4. **Residuals** — DIVERGE-style decomposition × upsampling Cartesian product. For each (decomp, upsamp) pair: decompose → downsample residual (path A) → upsample back → compute rich 20-dim analysis. Dimension = n_decomp × n_upsamp × slots_per_pair × 20. The shipped `configs/residuals.yaml` defaults to **640-d** (4×4 grid × 2 slots per pair: path A + bidirectional asymmetry). Two optional amplification stages live here: `bidirectional` (default ON, +2% separability at 2× cost) appends a second slot per pair carrying the (A − B) asymmetry vector; `turing_intermediate` (default OFF, experimental) passes the round-trip output through Gray-Scott reaction-diffusion before analysis (`src/utils/turing.py`). Use `compare_separability.py` for a full within/across-tile separability sweep and `sweep_turing.py` for Turing-specific iteration/Pearson-(F,k)-grid sweeps. The sweep evidence for the current defaults lives in `data/separability/*.json`.
@@ -58,7 +60,7 @@ The core abstraction is `SignatureConfig` (`src/config.py`). It toggles five ind
 
 ### Registry pattern for extensibility
 
-Both `src/decomposition/` and `src/upsampling/` use a decorator-based registry (`register_decomposition`, `register_upsampling`). `methods.py` holds core methods, `methods_extended.py` holds DIVERGE ports. Importing the package auto-registers everything. To add a method, decorate a function returning `(trend, residual)` (decomposition) or an upsampled array (upsampling) — no other wiring needed; `validate_config` will pick it up via `list_decompositions()` / `list_upsamplings()`.
+Both `src/decomposition/` and `src/upsampling/` re-export the decorator-based registries from the `residuals` package (`register_decomposition`, `register_upsampling`, `run_*`, `list_*`). The method implementations live in RESIDUALS (`residuals/decomposition/methods*.py`, `residuals/upsampling/methods*.py`), not here. To add a method, register it in RESIDUALS — no wiring needed on this side; `validate_config` picks it up via `list_decompositions()` / `list_upsamplings()`. `src/features/analysis.py` (the 20-dim rich analysis vector) is terravector's own and has diverged from RESIDUALS' `analyze_features`; keep it local.
 
 ### Index + metadata are paired files
 
@@ -79,8 +81,10 @@ Embeddings are z-score normalized at index build time; the per-dimension mean/st
 ## Things to watch for
 
 - **Signature config ordering is load-bearing.** The concatenation order in `compute_embedding_from_config` defines the meaning of each dimension. Changing it silently invalidates existing indices — users have no way to detect the mismatch beyond degraded query quality. The dim change from 320 → 640 when bidirectional was enabled by default is exactly this hazard: 320-d indices remain readable via their stored `signature_config`, but a fresh build with the current `residuals.yaml` is not query-compatible with them.
-- **County index is ~2 GB+ in memory.** 871K patches × 640 dims × 4 bytes ≈ 2.2 GB just for embeddings (was 1.1 GB at the old 320-d default). Be deliberate with copies.
-- **Per-tile audit sidecars.** `build_county_index.py` writes `{tile_id}_diagnostics.json` next to each checkpoint, recording any (decomp, upsamp, path) pairs that silently failed and were zero-filled in the embedding. The final `corpus.json` carries a `diagnostics` block rolling these up across tiles. Use them to spot e.g. edge-tile failure clusters (gaussian + zoom-based upsamplers on NaN-poisoned patches is a known one).
+- **County index is ~2 GB+ in memory.** 859K patches × 640 dims × 4 bytes ≈ 2.2 GB just for embeddings (was 1.1 GB at the old 320-d default). Be deliberate with copies.
+- **Per-tile audit sidecars.** `build_county_index.py` writes `{tile_id}_diagnostics.json` next to each checkpoint, recording any (decomp, upsamp, path) pairs that silently failed and were zero-filled in the embedding. The final `corpus.json` carries a `diagnostics` block rolling these up across tiles. Historical note: the `gaussian/{bicubic,lanczos,bspline}:A:ValueError` cluster on edge tiles came from constant-valued nodata-fill patches (not NaN) — their ~1e-13 gaussian residual noise broke the histogram in `analyze_features`. `tile_dem` now drops constant patches via `min_range`, so a fresh build should show zero failures; any that remain are new.
+- **Bumping the RESIDUALS pin is an index-compat event.** Any numeric change in a `residuals` method silently changes embeddings. Before adopting a new tag, recompute a sample of a checkpointed tile and compare bit-for-bit against the stored `.npz` (as was done for the v0.2.0 adoption: 117/117 rows identical). `rolling_ball` is the one method known to differ from the pre-dependency port; no shipped preset uses it.
+- **The SNR analysis feature is log-scaled (2026-10-11).** `compute_feature_snr` in `src/features/analysis.py` returns `log1p(std_signal / std_noise)`. The raw ratio reached 1e15 on near-flat residuals and, under z-score normalization, zeroed 12 of the 640 dims for every other patch. Indices built before this change are not query-compatible; the county checkpoints were transformed in place (`log1p` on dims 16::20) and the index reassembled, so no re-embedding was needed. Pre-change artifacts are in `data/licking_county/_backup_2026-10-11_pre_logsnr/`.
 - **Index files are gitignored** (`data/*.idx`, `data/*.npy`). Don't commit them. `data/similar_patches.png` is the one allowed artifact (README example).
 - **Windows paths in `build_county_index.py`** are hardcoded absolute (`F:\science-projects\...`). If refactoring for portability, those constants are the blocker.
 - **nmslib is on the roadmap to be replaced** (FAISS or Qdrant). Keep `src/index.py` as the isolation layer — callers should only touch `TerrainIndex`, not `nmslib` directly.
