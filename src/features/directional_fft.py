@@ -136,50 +136,52 @@ def _compute_slice_stat(
     radii: np.ndarray,
     stat: str
 ) -> float:
-    """Compute a single statistic from an angular slice."""
-    
+    """
+    Compute a single statistic from an angular slice.
+
+    ``slice_values`` is ordered [negative radii reversed, positive radii], so
+    its index is NOT monotone in frequency: position 0 is the highest
+    negative frequency and position n is the lowest positive one. Every
+    statistic below therefore works on ``freqs``, the |frequency| of each
+    sample, rather than on array position. (Before 2026-10-11 the band ratios
+    sliced by position, which made low_freq_ratio measure the highest band,
+    peak_freq range over 0..2, and spectral_centroid a constant.)
+    """
+
     total_energy = np.sum(slice_values ** 2)
-    
-    if total_energy == 0:
+
+    if not np.isfinite(total_energy) or total_energy == 0:
         return 0.0
-    
+
     n = len(radii)
-    low_cutoff = n // 3
-    high_cutoff = 2 * n // 3
-    
+    freqs = np.concatenate([radii[::-1], radii]).astype(np.float64)
+    weights = slice_values ** 2
+
     if stat == 'energy':
         # Log-scaled total energy
         return np.log1p(total_energy)
-    
+
     elif stat == 'low_freq_ratio':
         # Ratio of energy in low frequencies (large-scale features)
-        low_energy = np.sum(slice_values[:low_cutoff] ** 2)
+        low_energy = np.sum(weights[freqs < n / 3])
         return low_energy / total_energy
-    
+
     elif stat == 'high_freq_ratio':
         # Ratio of energy in high frequencies (fine detail)
-        high_energy = np.sum(slice_values[high_cutoff:] ** 2)
+        high_energy = np.sum(weights[freqs >= 2 * n / 3])
         return high_energy / total_energy
-    
+
     elif stat == 'peak_freq':
-        # Normalized frequency of peak magnitude
+        # Normalized |frequency| of the peak magnitude, in [0, 1]
         peak_idx = np.argmax(slice_values)
-        return peak_idx / n
-    
+        return freqs[peak_idx] / n
+
     elif stat == 'spectral_centroid':
-        # Weighted mean of frequencies
-        freqs = np.arange(len(slice_values))
-        weights = slice_values ** 2
-        if np.sum(weights) == 0:
-            return 0.5
+        # Energy-weighted mean |frequency|, in [0, 1]
         return np.average(freqs, weights=weights) / n
-    
+
     elif stat == 'spectral_spread':
-        # Standard deviation around centroid
-        freqs = np.arange(len(slice_values))
-        weights = slice_values ** 2
-        if np.sum(weights) == 0:
-            return 0.0
+        # Energy-weighted standard deviation of |frequency| around the centroid
         centroid = np.average(freqs, weights=weights)
         variance = np.average((freqs - centroid) ** 2, weights=weights)
         return np.sqrt(variance) / n
