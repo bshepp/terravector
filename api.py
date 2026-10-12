@@ -16,13 +16,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.index import TerrainIndex
 from src.coords import CoordBridge
+from src.similarity_raster import SimilarityRaster
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -85,6 +86,27 @@ class QueryByCoordsRequest(BaseModel):
     k: int = Field(default=10, ge=1, le=100)
 
 
+class SimilarityRasterRequest(BaseModel):
+    """Query location as a patch id, WGS84 (lon, lat), or (x, y) in ``crs``."""
+
+    patch_id: Optional[int] = None
+    lon: Optional[float] = None
+    lat: Optional[float] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    crs: Optional[str] = None
+    value: str = Field(default="similarity", pattern="^(similarity|distance)$")
+
+
+class RasterGridInfo(BaseModel):
+    rows: int
+    cols: int
+    cell_size_ft: float
+    crs: str
+    transform: List[float]
+    n_cells_with_patches: int
+
+
 class IndexInfo(BaseModel):
     n_patches: int
     embedding_dim: int
@@ -94,6 +116,7 @@ class IndexInfo(BaseModel):
     county_bounds: BBox
     county_bounds_wgs84: WGS84BBox
     signature_types: List[str]
+    raster_grid: Optional[RasterGridInfo] = None
 
 
 # ---------------------------------------------------------------------------
@@ -109,10 +132,11 @@ app = FastAPI(
 _index: Optional[TerrainIndex] = None
 _bridge: Optional[CoordBridge] = None
 _corpus: Optional[Dict[str, Any]] = None
+_raster: Optional[SimilarityRaster] = None
 
 
 def _load():
-    global _index, _bridge, _corpus
+    global _index, _bridge, _corpus, _raster
 
     idx_path = Path(INDEX_PATH)
     if not idx_path.with_suffix(".idx").exists() and not idx_path.with_suffix(".meta").exists():
@@ -129,6 +153,8 @@ def _load():
             index_metadata=_index.metadata,
             patch_size=_corpus.get("patch_size", 64),
         )
+        # One chunked pass over the embeddings (~2 s for the county index).
+        _raster = SimilarityRaster(_index, _bridge)
 
 
 @app.on_event("startup")
@@ -149,6 +175,67 @@ def _ensure_index():
 def _ensure_bridge():
     if _bridge is None:
         raise HTTPException(status_code=501, detail="Coordinate bridge unavailable — no corpus metadata found alongside index.")
+
+
+def _ensure_raster():
+    if _raster is None:
+        raise HTTPException(status_code=501, detail="Similarity raster unavailable — no corpus metadata found alongside index.")
+
+
+def _resolve_query_patch(
+    patch_id: Optional[int],
+    lon: Optional[float],
+    lat: Optional[float],
+    x: Optional[float],
+    y: Optional[float],
+    crs: Optional[str],
+) -> Tuple[int, Dict[str, Any]]:
+    """Turn one of (patch_id | lon,lat | x,y[,crs]) into a patch id + echo of the query."""
+    if patch_id is not None:
+        if patch_id not in _index.metadata:
+            raise HTTPException(status_code=404, detail=f"Patch {patch_id} not found in index.")
+        info: Dict[str, Any] = {"patch_id": patch_id}
+        if _bridge is not None:
+            ctr = _bridge.patch_id_to_state_plane_center(patch_id)
+            if ctr is not None:
+                info["coords"] = {"x": ctr[0], "y": ctr[1]}
+        return patch_id, info
+
+    _ensure_bridge()
+    if lon is not None and lat is not None:
+        sp_x, sp_y = _bridge.wgs84_to_state_plane(lon, lat)
+    elif x is not None and y is not None:
+        if crs and crs.upper() == "EPSG:4326":
+            sp_x, sp_y = _bridge.wgs84_to_state_plane(x, y)
+        else:
+            sp_x, sp_y = x, y
+    else:
+        raise HTTPException(status_code=422, detail="Provide patch_id, (lon, lat), or (x, y).")
+
+    resolved = _bridge.state_plane_to_patch_id(sp_x, sp_y)
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No patch at State Plane ({sp_x:.1f}, {sp_y:.1f}). Point may be outside coverage or in a no-data area.",
+        )
+    return resolved, {"patch_id": resolved, "coords": {"x": sp_x, "y": sp_y}}
+
+
+def _similarity_raster_response(patch_id: int, value: str) -> Response:
+    grid = _raster.raster(patch_id, value=value)
+    body = _raster.to_geotiff_bytes(
+        grid,
+        tags={"TERRAVECTOR_QUERY_PATCH_ID": str(patch_id), "TERRAVECTOR_VALUE": value},
+    )
+    return Response(
+        content=body,
+        media_type="image/tiff",
+        headers={
+            "Content-Disposition": f'inline; filename="terravector_{value}_{patch_id}.tif"',
+            "X-Terravector-Query-Patch-Id": str(patch_id),
+            "X-Terravector-Value": value,
+        },
+    )
 
 
 def _enrich_result(patch_id: int, distance: float, meta: Dict[str, Any]) -> PatchResult:
@@ -217,6 +304,7 @@ async def info():
             lon_min=wgs[0], lat_min=wgs[1], lon_max=wgs[2], lat_max=wgs[3]
         ),
         signature_types=_corpus.get("signature_types", []),
+        raster_grid=RasterGridInfo(**_raster.grid_info()) if _raster is not None else None,
     )
 
 
@@ -246,27 +334,55 @@ async def query_by_coords(req: QueryByCoordsRequest):
     _ensure_index()
     _ensure_bridge()
 
-    # Resolve to State Plane
-    if req.lon is not None and req.lat is not None:
-        sp_x, sp_y = _bridge.wgs84_to_state_plane(req.lon, req.lat)
-    elif req.x is not None and req.y is not None:
-        if req.crs and req.crs.upper() == "EPSG:4326":
-            sp_x, sp_y = _bridge.wgs84_to_state_plane(req.x, req.y)
-        else:
-            sp_x, sp_y = req.x, req.y
-    else:
-        raise HTTPException(status_code=422, detail="Provide (lon, lat) or (x, y).")
-
-    patch_id = _bridge.state_plane_to_patch_id(sp_x, sp_y)
-    if patch_id is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No patch at State Plane ({sp_x:.1f}, {sp_y:.1f}). Point may be outside coverage or in a no-data area.",
-        )
-
+    patch_id, query_info = _resolve_query_patch(None, req.lon, req.lat, req.x, req.y, req.crs)
     raw = _index.query_by_id(patch_id, k=req.k)
 
     return QueryResponse(
-        query={"patch_id": patch_id, "coords": {"x": sp_x, "y": sp_y}},
+        query=query_info,
         results=[_enrich_result(pid, dist, meta) for pid, dist, meta in raw],
     )
+
+
+@app.get(
+    "/similarity/raster",
+    responses={200: {"content": {"image/tiff": {}}, "description": "GeoTIFF, one cell per patch"}},
+)
+async def similarity_raster_get(
+    patch_id: Optional[int] = Query(default=None),
+    lon: Optional[float] = Query(default=None),
+    lat: Optional[float] = Query(default=None),
+    x: Optional[float] = Query(default=None),
+    y: Optional[float] = Query(default=None),
+    crs: Optional[str] = Query(default=None),
+    value: str = Query(default="similarity", pattern="^(similarity|distance)$"),
+):
+    """
+    County-wide similarity map for one query location, as a GeoTIFF.
+
+    Every patch in the index is scored against the query (exact cosine, not
+    HNSW) and written to its cell on the patch grid: one cell per patch,
+    ``patch_size * resolution_ft`` on a side, in the corpus CRS (EPSG:3735).
+    Cells without a patch are NaN. ``value=similarity`` (default) gives cosine
+    similarity in [-1, 1] with the query cell at 1; ``value=distance`` gives
+    ``1 - similarity`` to match the ``/query`` endpoints.
+
+    Loadable directly in GDAL/QGIS as
+    ``/vsicurl_streaming/http://host/similarity/raster?patch_id=N`` (the body is
+    generated per request, so the range-request ``/vsicurl/`` handler won't work).
+    """
+    _ensure_index()
+    _ensure_raster()
+    pid, _ = _resolve_query_patch(patch_id, lon, lat, x, y, crs)
+    return _similarity_raster_response(pid, value)
+
+
+@app.post(
+    "/similarity/raster",
+    responses={200: {"content": {"image/tiff": {}}, "description": "GeoTIFF, one cell per patch"}},
+)
+async def similarity_raster_post(req: SimilarityRasterRequest):
+    """JSON-body form of ``GET /similarity/raster``."""
+    _ensure_index()
+    _ensure_raster()
+    pid, _ = _resolve_query_patch(req.patch_id, req.lon, req.lat, req.x, req.y, req.crs)
+    return _similarity_raster_response(pid, req.value)

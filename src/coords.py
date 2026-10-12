@@ -40,6 +40,14 @@ class CoordBridge:
         self.crs = county.get("crs", "EPSG:3735")
         self.patch_size = patch_size
 
+        # The tile grid is anchored at the county's NW corner and extends in
+        # whole tiles, so its SE edge overshoots county_bounds (by ~210 ft in
+        # x and ~3500 ft in y for Licking County). Patches in that strip are
+        # real data and are in the index, so point lookups must use the grid
+        # extent, not the nominal county bounds.
+        self.grid_x_max = self.x_min + self.grid_cols * self.tile_size_ft
+        self.grid_y_min = self.y_max - self.grid_rows * self.tile_size_ft
+
         self.tile_info: Dict[str, Dict[str, Any]] = corpus_metadata.get("tile_info", {})
         self.index_metadata = index_metadata
 
@@ -76,7 +84,7 @@ class CoordBridge:
         Map State Plane (x, y) to (tile_id, pixel_row, pixel_col).
         Returns None if the point falls outside the grid.
         """
-        if x < self.x_min or x >= self.x_max or y <= self.y_min or y > self.y_max:
+        if x < self.x_min or x >= self.grid_x_max or y <= self.grid_y_min or y > self.y_max:
             return None
 
         col = int((x - self.x_min) / self.tile_size_ft)
@@ -97,8 +105,12 @@ class CoordBridge:
 
         tile_shape = self.tile_info[tile_id].get("tile_shape")
         if tile_shape is not None:
-            max_py = tile_shape[0] if isinstance(tile_shape, (list, tuple)) else int(tile_shape)
-            max_px = tile_shape[1] if isinstance(tile_shape, (list, tuple)) else int(tile_shape)
+            # corpus.json written before 2026-10-11 serialized these as strings
+            # (json.dump default=str on numpy ints); coerce defensively.
+            if isinstance(tile_shape, (list, tuple)):
+                max_py, max_px = int(tile_shape[0]), int(tile_shape[1])
+            else:
+                max_py = max_px = int(tile_shape)
             px = min(px, max_px - 1)
             py = min(py, max_py - 1)
 

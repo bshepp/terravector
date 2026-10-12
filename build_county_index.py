@@ -95,7 +95,9 @@ def save_checkpoint(
 def load_checkpoint(tile_id: str):
     data = np.load(get_checkpoint_path(tile_id))
     embeddings = data["embeddings"]
-    tile_shape = tuple(data["tile_shape"])
+    # Plain ints: numpy ints would be stringified by json.dump(default=str)
+    # in corpus.json and break CoordBridge's pixel clamping.
+    tile_shape = tuple(int(v) for v in data["tile_shape"])
 
     meta_path = CHECKPOINT_DIR / f"{tile_id}_meta.json"
     with open(meta_path) as f:

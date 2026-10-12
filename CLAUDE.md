@@ -38,6 +38,9 @@ python viewer.py <dem.npy> <idx>       # napari desktop viewer
 uvicorn api:app --reload --host 127.0.0.1 --port 8000
 # Index path via env var:
 TERRAVECTOR_INDEX=path/to/licking_county.idx uvicorn api:app
+
+# County-wide similarity GeoTIFF without the API
+python -m src.similarity_raster data/licking_county/licking_county.idx --patch 588007 -o out.tif
 ```
 
 `build_county_index.py` writes per-tile `.npz` checkpoints under `data/licking_county/checkpoints/` and is safe to interrupt. `--resume` skips already-checkpointed tiles. The final index is a single unified HNSW across all 858,642 patches (200 tiles × up to 66×66 patches each at patch_size=64, after dropping nodata and constant-fill patches). The embedding pass is single-threaded at ~15 min/tile; `county_worker.py` fills idle cores and writes the same checkpoints.
@@ -72,7 +75,11 @@ Patch metadata always includes `y_start`, `x_start`, `row`, `col`, `center`, `sh
 
 `src/coords.py::CoordBridge` maps **WGS84 ↔ EPSG:3735 (Ohio State Plane South, feet) ↔ (tile_id, pixel) ↔ global patch_id**. It's only meaningful when the index was built from the Licking County corpus — it needs `corpus.json` alongside the `.idx`/`.meta`. API endpoints gracefully 501 when the bridge is unavailable.
 
-When working with spatial queries: State Plane is authoritative internally; WGS84 is a convenience at API/UI boundaries. The bridge builds a `(tile_id, y_start, x_start) → global_id` lookup at construction so point queries are O(1).
+When working with spatial queries: State Plane is authoritative internally; WGS84 is a convenience at API/UI boundaries. The bridge builds a `(tile_id, y_start, x_start) → global_id` lookup at construction so point queries are O(1). Point lookups are bounded by the **tile grid extent** (`grid_x_max`, `grid_y_min`), not the nominal `county_bounds`: the grid is whole tiles anchored at the NW corner and overshoots the county's SE edge, and the patches in that strip are real data.
+
+### Similarity raster (county builds only)
+
+`src/similarity_raster.py::SimilarityRaster` scores every patch against one query and lays the scores on the county patch grid (`grid_rows × 66` by `grid_cols × 66` cells of `patch_size × resolution_ft`), returned as an in-memory GeoTIFF by `GET/POST /similarity/raster`. It is exact cosine over the stored raw embeddings, not an HNSW query: z-score normalization is folded in algebraically (`z(e)·z(q) = e·(z(q)/σ) − (μ/σ)·z(q)`) and row norms are precomputed once at startup, so there is no normalized copy of the 2 GB matrix and a full scan is one float32 BLAS matvec (~100 ms). Keep the matvec operand float32: a float64 vector would upcast the whole matrix.
 
 ### Normalization is stored, not recomputed
 

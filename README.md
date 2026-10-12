@@ -244,10 +244,37 @@ Interactive Swagger docs at `http://127.0.0.1:8000/docs`.
 - `GET  /info` — index stats, county bounds (both State Plane and WGS84), signature types
 - `POST /query/by-id` — `{patch_id, k}` → similar patches enriched with bbox + center
 - `POST /query/by-coords` — `{lon, lat, k}` or `{x, y, crs, k}` → resolves to a patch, then queries
+- `GET/POST /similarity/raster` — county-wide similarity map for one query location, as a GeoTIFF
 
 Spatial endpoints return results with both State Plane (EPSG:3735, ft) and
 WGS84 bounding boxes when the index ships with a `*.corpus.json` sidecar.
 Without one, the bridge endpoints respond 501.
+
+### Similarity raster
+
+The most portable way to consume the index from a GIS is the similarity
+raster: every patch is scored against the query (exact cosine over the full
+embedding matrix, ~100 ms for 858K patches) and written to its cell on the
+county patch grid. The result is a plain GeoTIFF in EPSG:3735, one cell per
+patch (160 ft for the Licking County build), NaN where there is no patch, with
+the query cell at 1.0. Any GIS can style it as a heat map; no plugin needed.
+
+```bash
+# Query by patch id, WGS84, or State Plane; value=similarity (default) or distance
+curl -o great_circle.tif "http://127.0.0.1:8000/similarity/raster?lon=-82.4590&lat=40.0279"
+curl -o patch_588007.tif "http://127.0.0.1:8000/similarity/raster?patch_id=588007&value=distance"
+
+# GDAL/rasterio/QGIS can read it straight from the URL with the streaming
+# handler (the response is generated on the fly, so plain /vsicurl/ range
+# requests are not supported):
+gdalinfo "/vsicurl_streaming/http://127.0.0.1:8000/similarity/raster?patch_id=588007"
+
+# Offline, without the API:
+python -m src.similarity_raster data/licking_county/licking_county.idx --patch 588007 -o out.tif
+```
+
+`GET /info` reports the raster grid (`raster_grid`: rows, cols, cell size,
+CRS, affine transform) so clients can allocate ahead of time.
 
 Quick sanity check that a point of interest is inside your corpus
 (no full index load required):
@@ -314,6 +341,7 @@ terravector/
 ├── src/
 │   ├── config.py              # YAML config parsing
 │   ├── coords.py              # WGS84 ↔ State Plane ↔ patch ID bridge
+│   ├── similarity_raster.py   # County-wide similarity map → GeoTIFF
 │   ├── tiling.py              # DEM → patches
 │   ├── decomposition/         # Facade over residuals.decomposition (RESIDUALS)
 │   ├── upsampling/            # Facade over residuals.upsampling (RESIDUALS)
