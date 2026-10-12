@@ -154,6 +154,7 @@ Frequency analysis at multiple angles through the 2D FFT:
 | `hybrid` | All three | 88 | Maximum discrimination |
 | `minimal` | Reduced decomp + geomorph | 24 | Fast computation |
 | `residuals` | Decomp × Upsamp + Analysis (bidirectional) | 640 | DIVERGE-style rich features w/ MTile asymmetry |
+| `residuals_extended` | 8 decomp × 6 upsamp + Analysis (path A only) | 960 | Wider method grid; code-only preset, no YAML |
 | `spectral` | Directional FFT (8 angles) | 48 | Oriented feature detection |
 | `spectral_hybrid` | Decomposition + FFT | 60 | Combined spatial + spectral |
 
@@ -361,7 +362,7 @@ terravector/
 │   │   ├── layers.py          # Overlay layer generators
 │   │   └── widgets.py         # Qt control widgets
 │   └── utils/
-│       ├── io.py              # DEM loading, index persistence
+│       ├── io.py              # DEM loading (.npy / GeoTIFF) and DEM stats
 │       └── turing.py          # Gray-Scott amplifier for residuals signature
 ├── configs/                   # Signature configurations
 │   ├── default.yaml
@@ -370,7 +371,8 @@ terravector/
 │   ├── minimal.yaml
 │   ├── residuals.yaml         # DIVERGE-style decomp × upsamp
 │   ├── spectral.yaml          # Directional FFT signatures
-│   └── spectral_hybrid.yaml   # Combined decomposition + FFT
+│   ├── spectral_hybrid.yaml   # Combined decomposition + FFT
+│   └── texture.yaml           # GLCM + LBP only
 ├── data/                      # Test data and outputs (corpus + checkpoints gitignored)
 ├── requirements.txt
 └── LICENSE                    # Apache 2.0
@@ -378,8 +380,10 @@ terravector/
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.13 is what the project is developed and tested on (nmslib wheels are the usual
+  blocker on other versions)
 - numpy, scipy, scikit-image, PyWavelets, opencv-python
+- residuals (the RESIDUALS sibling project: decomposition + upsampling methods)
 - nmslib (HNSW implementation)
 - matplotlib (visualization)
 - PyYAML (configuration)
@@ -387,6 +391,7 @@ terravector/
 - napari (desktop viewer — GPU-accelerated)
 - fastapi + uvicorn (REST API)
 - pyproj (WGS84 ↔ State Plane coordinate transforms)
+- rasterio (GeoTIFF input and the similarity-raster endpoint)
 
 ## Inspiration
 

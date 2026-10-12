@@ -535,7 +535,7 @@ def get_preset(name: str) -> SignatureConfig:
     Get a preset configuration by name.
     
     Args:
-        name: Preset name ('default', 'classic', 'texture', 'hybrid', 'minimal')
+        name: Preset name; any key of PRESETS (see _create_presets)
         
     Returns:
         SignatureConfig for the preset
