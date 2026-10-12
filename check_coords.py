@@ -1,15 +1,18 @@
 #!/usr/bin/env python
 """
 Check whether a WGS84 (lat, lon) point falls inside a terravector corpus,
-and report which tile (and patch, if available) contains it.
+and report which tile (and pixel) contains it.
 
 Intended as a quick sanity check for users wiring up the REST API or
-QGIS plugin — answers "is my point of interest actually indexed?" without
-needing to load the full HNSW index.
+QGIS plugin: answers "is my point of interest actually indexed?" without
+needing to load the full HNSW index. Uses the same CoordBridge as the API,
+so its answer matches what /query/by-coords would resolve (the bridge
+bounds lookups by the tile-grid extent, which overshoots the nominal
+county bounds on the south and east edges).
 
 Usage:
     python check_coords.py --lat 40.0279 --lon -82.4590
-    python check_coords.py --lat 40.0279 --lon -82.4590 \
+    python check_coords.py --lat 40.0279 --lon -82.4590 \\
         --corpus data/licking_county/licking_county.corpus.json
 
 The corpus argument defaults to data/licking_county/licking_county.corpus.json
@@ -21,28 +24,17 @@ import json
 import sys
 from pathlib import Path
 
-from pyproj import Transformer
+sys.path.insert(0, str(Path(__file__).parent))
+
+from src.coords import CoordBridge  # noqa: E402
 
 DEFAULT_CORPUS = Path("data/licking_county/licking_county.corpus.json")
 
 
-def load_corpus_bounds(corpus_path: Path) -> dict:
-    with open(corpus_path) as f:
-        corpus = json.load(f)
-    county = corpus["county_metadata"]
-    return {
-        "bounds": county["county_bounds"],
-        "tile_size_ft": county["tile_size_ft"],
-        "resolution_ft": county["resolution_ft"],
-        "grid_rows": county["grid_rows"],
-        "grid_cols": county["grid_cols"],
-        "crs": county.get("crs", "EPSG:3735"),
-        "tile_info": corpus.get("tile_info", {}),
-    }
-
-
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    p = argparse.ArgumentParser(
+        description="Check whether a WGS84 point falls inside a terravector corpus."
+    )
     p.add_argument("--lat", type=float, required=True, help="WGS84 latitude")
     p.add_argument("--lon", type=float, required=True, help="WGS84 longitude")
     p.add_argument(
@@ -56,47 +48,52 @@ def main() -> int:
         print("  Run build_county_index.py first, or pass --corpus.", file=sys.stderr)
         return 2
 
-    info = load_corpus_bounds(args.corpus)
-    bounds = info["bounds"]
+    with open(args.corpus) as f:
+        corpus = json.load(f)
 
-    transformer = Transformer.from_crs("EPSG:4326", info["crs"], always_xy=True)
-    x, y = transformer.transform(args.lon, args.lat)
+    # No index metadata: tile/pixel resolution works, patch-id resolution does not.
+    bridge = CoordBridge(corpus, index_metadata={}, patch_size=corpus.get("patch_size", 64))
+    x, y = bridge.wgs84_to_state_plane(args.lon, args.lat)
 
     print(f"Input:        lat={args.lat}, lon={args.lon} (WGS84)")
-    print(f"Projected:    X={x:,.1f}, Y={y:,.1f} ({info['crs']}, feet)")
+    print(f"Projected:    X={x:,.1f}, Y={y:,.1f} ({bridge.crs}, feet)")
     print(
-        f"Corpus bbox:  X=[{bounds['x_min']:,.0f}, {bounds['x_max']:,.0f}], "
-        f"Y=[{bounds['y_min']:,.0f}, {bounds['y_max']:,.0f}]"
+        f"County bbox:  X=[{bridge.x_min:,.0f}, {bridge.x_max:,.0f}], "
+        f"Y=[{bridge.y_min:,.0f}, {bridge.y_max:,.0f}]"
+    )
+    print(
+        f"Tile grid:    X=[{bridge.x_min:,.0f}, {bridge.grid_x_max:,.0f}], "
+        f"Y=[{bridge.grid_y_min:,.0f}, {bridge.y_max:,.0f}] "
+        f"({bridge.grid_rows} rows x {bridge.grid_cols} cols of {bridge.tile_size_ft:,.0f} ft)"
     )
 
-    inside = (
-        bounds["x_min"] <= x < bounds["x_max"]
-        and bounds["y_min"] < y <= bounds["y_max"]
-    )
-    if not inside:
-        print("\nResult:       OUTSIDE corpus coverage")
-        print(
-            f"  X offset from min: {x - bounds['x_min']:+,.0f} ft "
-            f"(corpus width {bounds['x_max'] - bounds['x_min']:,.0f} ft)"
+    hit = bridge.state_plane_to_tile_pixel(x, y)
+    if hit is None:
+        in_grid = (
+            bridge.x_min <= x < bridge.grid_x_max
+            and bridge.grid_y_min < y <= bridge.y_max
         )
-        print(
-            f"  Y offset from min: {y - bounds['y_min']:+,.0f} ft "
-            f"(corpus height {bounds['y_max'] - bounds['y_min']:,.0f} ft)"
-        )
+        if in_grid:
+            print("\nResult:       INSIDE the tile grid, but the tile there has no data")
+        else:
+            print("\nResult:       OUTSIDE corpus coverage")
+            print(
+                f"  X offset from grid min: {x - bridge.x_min:+,.0f} ft "
+                f"(grid width {bridge.grid_x_max - bridge.x_min:,.0f} ft)"
+            )
+            print(
+                f"  Y offset from grid min: {y - bridge.grid_y_min:+,.0f} ft "
+                f"(grid height {bridge.y_max - bridge.grid_y_min:,.0f} ft)"
+            )
         return 1
 
-    col = int((x - bounds["x_min"]) / info["tile_size_ft"])
-    row = int((bounds["y_max"] - y) / info["tile_size_ft"])
-    col = min(col, info["grid_cols"] - 1)
-    row = min(row, info["grid_rows"] - 1)
-    tile_id = f"R{row:02d}_C{col:02d}"
-    indexed = tile_id in info["tile_info"]
-
+    tile_id, py, px = hit
+    ti = bridge.tile_info[tile_id]
     print("\nResult:       INSIDE corpus coverage")
-    print(f"  Tile:        {tile_id} ({'indexed' if indexed else 'NOT indexed — tile may be empty/no-data'})")
-    if indexed:
-        ti = info["tile_info"][tile_id]
-        print(f"  Patches in tile: {ti.get('n_patches', 'unknown')}")
+    print(f"  Tile:        {tile_id} (pixel row {py}, col {px})")
+    print(f"  Patch cell:  row {py // bridge.patch_size}, col {px // bridge.patch_size} "
+          f"(patch_size {bridge.patch_size})")
+    print(f"  Patches in tile: {ti.get('n_patches', 'unknown')}")
     return 0
 
 

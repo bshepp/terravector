@@ -108,6 +108,10 @@ def separability(dist: np.ndarray, tile_idx: np.ndarray) -> Dict[str, float]:
 
 def base_config(full_grid: bool) -> SignatureConfig:
     cfg = get_preset("residuals")
+    # The shipped preset is bidirectional by default; the sweep's "vanilla"
+    # reference and "turing" curve are the path-A-only variants, so start
+    # from bidirectional=False and let variant(..., bidirectional=True) add it.
+    cfg.residuals.bidirectional = False
     if not full_grid:
         cfg.residuals.decomposition_methods = ["gaussian", "wavelet_dwt"]
         cfg.residuals.upsampling_methods = ["bicubic", "lanczos"]

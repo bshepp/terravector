@@ -14,8 +14,8 @@ together and pushes patches from different tiles apart. Time-per-patch and
 embedding dimension are reported alongside so we can see the cost.
 
 Default variants:
-    vanilla         residuals signature as shipped (320 d)
-    +bidirectional  adds path-B asymmetry per pair    (640 d)
+    vanilla         residuals signature, path A only  (320 d on the full grid)
+    +bidirectional  adds path-B asymmetry per pair    (640 d; the shipped default)
     +turing         vanilla with Gray-Scott intermediate
     +both           bidirectional + Turing
 
@@ -65,12 +65,16 @@ def build_variants(full_grid: bool, turing_iter: int) -> List[SignatureConfig]:
         base.residuals.decomposition_methods = ["gaussian", "wavelet_dwt"]
         base.residuals.upsampling_methods = ["bicubic", "lanczos"]
 
+    # The shipped preset is bidirectional by default (since 2026-05-23), so
+    # the non-bidirectional variants must switch it off explicitly or the
+    # "vanilla" baseline silently becomes a duplicate of "bidirectional".
     return [
-        _make_variant("vanilla", base),
+        _make_variant("vanilla", base, bidirectional=False),
         _make_variant("bidirectional", base, bidirectional=True),
         _make_variant(
             "turing",
             base,
+            bidirectional=False,
             turing_intermediate=True,
             turing_iterations=turing_iter,
         ),
