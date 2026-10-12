@@ -13,6 +13,7 @@ Docs at http://127.0.0.1:8000/docs
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -133,6 +134,11 @@ _index: Optional[TerrainIndex] = None
 _bridge: Optional[CoordBridge] = None
 _corpus: Optional[Dict[str, Any]] = None
 _raster: Optional[SimilarityRaster] = None
+# A raster request is ~0.6 s of CPU (full scan + GeoTIFF encode) and ~10 MB of
+# transient allocation. The handlers are sync so they run in the threadpool
+# instead of blocking the event loop; this cap keeps a burst of requests from
+# stacking scans (BLAS is already multithreaded, so concurrency buys nothing).
+_raster_slots = threading.BoundedSemaphore(2)
 
 
 def _load():
@@ -222,11 +228,13 @@ def _resolve_query_patch(
 
 
 def _similarity_raster_response(patch_id: int, value: str) -> Response:
-    grid = _raster.raster(patch_id, value=value)
-    body = _raster.to_geotiff_bytes(
-        grid,
-        tags={"TERRAVECTOR_QUERY_PATCH_ID": str(patch_id), "TERRAVECTOR_VALUE": value},
-    )
+    with _raster_slots:
+        grid = _raster.raster(patch_id, value=value)
+        body = _raster.to_geotiff_bytes(
+            grid,
+            tags={"TERRAVECTOR_QUERY_PATCH_ID": str(patch_id), "TERRAVECTOR_VALUE": value},
+        )
+        del grid
     return Response(
         content=body,
         media_type="image/tiff",
@@ -347,7 +355,7 @@ async def query_by_coords(req: QueryByCoordsRequest):
     "/similarity/raster",
     responses={200: {"content": {"image/tiff": {}}, "description": "GeoTIFF, one cell per patch"}},
 )
-async def similarity_raster_get(
+def similarity_raster_get(
     patch_id: Optional[int] = Query(default=None),
     lon: Optional[float] = Query(default=None),
     lat: Optional[float] = Query(default=None),
@@ -380,7 +388,7 @@ async def similarity_raster_get(
     "/similarity/raster",
     responses={200: {"content": {"image/tiff": {}}, "description": "GeoTIFF, one cell per patch"}},
 )
-async def similarity_raster_post(req: SimilarityRasterRequest):
+def similarity_raster_post(req: SimilarityRasterRequest):
     """JSON-body form of ``GET /similarity/raster``."""
     _ensure_index()
     _ensure_raster()
