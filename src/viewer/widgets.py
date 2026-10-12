@@ -124,7 +124,12 @@ def create_control_widget(viewer: 'TerrainViewer') -> Container:
     # Update status when query happens
     original_query = viewer.query_by_id
     def query_with_status(patch_id: int):
-        original_query(patch_id)
+        try:
+            original_query(patch_id)
+        except Exception as e:  # surface instead of dying inside the Qt slot
+            status_label.value = f"Query #{patch_id} failed: {e}"
+            print(f"Query failed: {e}")
+            return
         if viewer.results:
             status_label.value = f"Query #{patch_id}: {len(viewer.results)} results"
         else:

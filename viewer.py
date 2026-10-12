@@ -36,8 +36,8 @@ Visualization Modes:
   Box Outlines     Colored rectangles around similar tiles
                    (Green = query, Orange gradient = results by distance)
   
-  Heatmap          Similarity scores as color intensity
-                   (Blue = low similarity, Red = high similarity)
+  Heatmap          Similarity rank as color
+                   (Blue = least similar shown, Red = most similar)
   
   Fade             Dim non-matching tiles
                    (Similar tiles remain bright)
@@ -78,7 +78,7 @@ Keyboard Shortcuts (napari defaults):
         '--patch-size', '-p',
         type=int,
         default=64,
-        help='Patch size (default: 64, overridden by index metadata)'
+        help='Patch size when the index metadata does not record one (default: 64)'
     )
     
     args = parser.parse_args()
@@ -119,7 +119,7 @@ Keyboard Shortcuts (napari defaults):
         print(f"Index: {index_path}")
     if not dem_path and not index_path:
         print("No files specified - launching empty viewer")
-        print("Use File menu or load programmatically")
+        print("Pass a DEM and/or --index to query; see --help")
     
     print()
     print("Controls:")

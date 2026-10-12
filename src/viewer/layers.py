@@ -10,6 +10,9 @@ Create napari layer data for visualization overlays:
 import numpy as np
 from typing import List, Tuple, Dict, Optional, Any
 
+# Brightness ceiling for non-matching tiles in fade mode (0 = black, 1 = unchanged).
+FADE_DIM_LEVEL = 0.35
+
 
 def create_box_layer_data(
     results: List[Tuple[int, float, Dict]],
@@ -126,32 +129,33 @@ def create_fade_mask_layer(
     """
     Create fade mask to dim non-matching tiles.
     
-    Similar tiles remain bright (value 0), non-matching tiles are darkened.
-    
+    Meant for an Image layer with blending='minimum' and contrast limits
+    (0, 1): the terrain's brightness is clamped to the mask value, so 1.0
+    leaves matching tiles untouched and FADE_DIM_LEVEL darkens the rest.
+
     Args:
         results: List of (patch_id, distance, metadata) tuples
         dem_shape: Shape of the DEM (height, width)
         patch_size: Size of patches
-        
+
     Returns:
-        Float array with 0 for matching tiles, negative for non-matching
+        Float array with 1.0 for matching tiles, FADE_DIM_LEVEL for non-matching
     """
-    # Start with dark mask everywhere
-    mask = np.full(dem_shape, -0.5, dtype=np.float32)
-    
     if not results:
-        return np.zeros(dem_shape, dtype=np.float32)
-    
-    # Clear mask for matching tiles
+        return np.ones(dem_shape, dtype=np.float32)
+
+    mask = np.full(dem_shape, FADE_DIM_LEVEL, dtype=np.float32)
+
+    # Keep matching tiles at full brightness
     for pid, dist, meta in results:
         y = meta.get('y_start', 0)
         x = meta.get('x_start', 0)
         ps = meta.get('patch_size', patch_size)
-        
+
         y_end = min(y + ps, dem_shape[0])
         x_end = min(x + ps, dem_shape[1])
-        mask[y:y_end, x:x_end] = 0.0
-    
+        mask[y:y_end, x:x_end] = 1.0
+
     return mask
 
 

@@ -52,6 +52,11 @@ class TerrainViewer:
         self.dem = dem
         self.index = index
         self.patch_size = patch_size
+        self.dem_path: Optional[str] = None
+        # (dem_key, patch_row, patch_col) -> patch_id, built when an index
+        # is loaded, so click-to-query is O(1) instead of a scan of the
+        # metadata dict (858K entries for the county index).
+        self._patch_lookup: Dict[Tuple[Optional[str], int, int], int] = {}
         
         # State
         self.query_patch_id: Optional[int] = None
@@ -71,24 +76,65 @@ class TerrainViewer:
         self.heatmap_layer: Optional[Labels] = None
         self.fade_layer: Optional[Image] = None
         
+    @staticmethod
+    def _dem_key(path: Optional[str]) -> Optional[str]:
+        """Canonical form of a DEM path for matching metadata to the loaded raster."""
+        if not path:
+            return None
+        try:
+            return str(Path(path).resolve()).lower()
+        except OSError:
+            return str(path).lower()
+
+    def _meta_patch_size(self, meta: Dict[str, Any]) -> int:
+        """Patch size for one metadata entry: stored value, else its shape, else the CLI default."""
+        if 'patch_size' in meta:
+            return int(meta['patch_size'])
+        shape = meta.get('shape')
+        if shape:
+            return int(shape[0])
+        return self.patch_size
+
+    def _is_current_dem(self, meta: Dict[str, Any]) -> bool:
+        """
+        True if this patch belongs to the loaded DEM. Single-DEM indices have
+        one dem_path (or none) so everything matches; county indices carry a
+        per-tile dem_path and only the loaded tile's patches may be drawn,
+        because y_start/x_start are tile-local pixel coordinates.
+        """
+        meta_key = self._dem_key(meta.get('dem_path'))
+        return meta_key is None or self.dem_path is None or meta_key == self.dem_path
+
     def load_dem(self, path: str) -> None:
         """Load a DEM from file."""
         self.dem = load_dem(path)
+        self.dem_path = self._dem_key(path)
         self.dem_info = get_dem_info(self.dem)
-        
+
         # Infer patch size from index if available
         if self.index is not None:
             sample_meta = next(iter(self.index.metadata.values()), {})
-            self.patch_size = sample_meta.get('patch_size', 64)
-    
+            self.patch_size = self._meta_patch_size(sample_meta)
+
     def load_index(self, path: str) -> None:
         """Load an index from file."""
         self.index = TerrainIndex.load(path)
-        
+
         # Try to get patch size from metadata
         sample_meta = next(iter(self.index.metadata.values()), {})
-        self.patch_size = sample_meta.get('patch_size', 64)
-        
+        self.patch_size = self._meta_patch_size(sample_meta)
+
+        self._patch_lookup = {}
+        for pid, meta in self.index.metadata.items():
+            ps = self._meta_patch_size(meta)
+            key = (self._dem_key(meta.get('dem_path')), meta['y_start'] // ps, meta['x_start'] // ps)
+            self._patch_lookup[key] = pid
+
+        n_dems = len({self._dem_key(m.get('dem_path')) for m in self.index.metadata.values()})
+        if n_dems > 1:
+            print(f"Note: index spans {n_dems} DEM tiles; only patches on the loaded tile are shown. "
+                  "Use the REST API or the similarity raster for county-wide queries.")
+
         # Try to load source DEM if referenced
         dem_path = sample_meta.get('dem_path')
         if dem_path and Path(dem_path).exists() and self.dem is None:
@@ -150,20 +196,28 @@ class TerrainViewer:
                 visible=self.show_heatmap
             )
         
-        # Fade mask (image layer with dark overlay)
+        # Fade mask: 'minimum' blending clamps the terrain's brightness to
+        # the mask value, so 1.0 leaves matching tiles untouched and the
+        # darker value in create_fade_mask_layer dims everything else.
+        # (Additive blending of a black/negative mask was a visual no-op.)
         if self.dem is not None:
-            empty_mask = np.zeros(self.dem.shape, dtype=np.float32)
+            empty_mask = np.ones(self.dem.shape, dtype=np.float32)
             self.fade_layer = self.viewer.add_image(
                 empty_mask,
                 name="Fade Mask",
                 colormap="gray",
-                blending="additive",
-                opacity=0.6,
+                blending="minimum",
+                contrast_limits=(0.0, 1.0),
+                opacity=1.0,
                 visible=self.show_fade
             )
     
     def _connect_mouse_callback(self) -> None:
         """Connect mouse click handler for querying."""
+        if self.hillshade_layer is None:
+            # Index-only launch with no DEM on disk: nothing to click on.
+            return
+
         @self.hillshade_layer.mouse_drag_callbacks.append
         def on_click(layer, event):
             if event.type == 'mouse_press':
@@ -179,14 +233,16 @@ class TerrainViewer:
             print("No index loaded")
             return
         
-        # Find patch containing these coordinates
-        for pid, meta in self.index.metadata.items():
-            ps = meta.get('patch_size', self.patch_size)
-            if (meta['y_start'] <= y < meta['y_start'] + ps and
-                meta['x_start'] <= x < meta['x_start'] + ps):
+        # Find the patch containing these coordinates on the loaded DEM.
+        if y < 0 or x < 0:
+            print(f"No patch found at ({y}, {x})")
+            return
+        for dem_key in (self.dem_path, None):
+            pid = self._patch_lookup.get((dem_key, y // self.patch_size, x // self.patch_size))
+            if pid is not None:
                 self.query_by_id(pid)
                 return
-        
+
         print(f"No patch found at ({y}, {x})")
     
     def query_by_id(self, patch_id: int) -> None:
@@ -210,9 +266,14 @@ class TerrainViewer:
         if not self.results or self.dem is None:
             return
         
-        # Filter by threshold
+        # Filter by threshold, and to patches on the loaded DEM (county
+        # indices store tile-local coordinates for other tiles).
         filtered = [(pid, dist, meta) for pid, dist, meta in self.results
-                    if dist <= self.threshold]
+                    if dist <= self.threshold and self._is_current_dem(meta)]
+        hidden = sum(1 for _, dist, meta in self.results
+                     if dist <= self.threshold and not self._is_current_dem(meta))
+        if hidden:
+            print(f"  ({hidden} result(s) on other tiles not shown)")
         
         # Update box layer
         if self.box_layer is not None:
