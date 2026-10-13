@@ -153,6 +153,11 @@ def main():
         "--max-tiles", type=int, default=None,
         help="Process at most N tiles (for validation runs). Default: all tiles.",
     )
+    parser.add_argument(
+        "--threads", type=int, default=None,
+        help="Cap HNSW construction threads. Default: nmslib uses every core, "
+             "which saturates the machine for the whole Phase 2 build.",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -335,7 +340,8 @@ def main():
     print(f"  Tiles indexed:   {len(tile_info)}")
     print(f"  Memory:          {embeddings_matrix.nbytes / (1024**2):,.1f} MB")
 
-    print(f"\n  Building HNSW index (M={args.M}, ef={args.ef_construction})...")
+    thread_note = f", threads={args.threads}" if args.threads else ", threads=all"
+    print(f"\n  Building HNSW index (M={args.M}, ef={args.ef_construction}{thread_note})...")
     t_build = time.time()
 
     index = build_index(
@@ -345,6 +351,7 @@ def main():
         M=args.M,
         ef_construction=args.ef_construction,
         normalize=config.normalize,
+        num_threads=args.threads,
     )
     index.signature_config = config.to_dict()
 

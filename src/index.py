@@ -52,16 +52,20 @@ class TerrainIndex:
         embeddings: np.ndarray,
         metadata: Dict[int, Dict[str, Any]],
         normalize: bool = True,
-        ef_search: int = 50
+        ef_search: int = 50,
+        num_threads: Optional[int] = None
     ) -> None:
         """
         Build the index from embeddings.
-        
+
         Args:
             embeddings: 2D array of shape (n_patches, dim)
             metadata: Dictionary mapping patch_id to metadata
             normalize: Apply z-score normalization
             ef_search: Query time accuracy parameter
+            num_threads: Cap on HNSW construction threads. None lets nmslib
+                use every core, which saturates a workstation for the whole
+                build; pass a small number to leave the machine usable.
         """
         n_items = len(embeddings)
         
@@ -86,11 +90,14 @@ class TerrainIndex:
         self.index = nmslib.init(method='hnsw', space=self.space)
         self.index.addDataPointBatch(normalized.astype(np.float32))
         
-        self.index.createIndex({
+        index_params = {
             'M': self.M,
             'efConstruction': self.ef_construction,
             'post': 2  # Post-processing level
-        }, print_progress=False)
+        }
+        if num_threads is not None:
+            index_params['indexThreadQty'] = int(num_threads)
+        self.index.createIndex(index_params, print_progress=False)
         
         self.index.setQueryTimeParams({'efSearch': ef_search})
         
@@ -239,11 +246,12 @@ def build_index(
     space: str = 'cosinesimil',
     M: int = 16,
     ef_construction: int = 200,
-    normalize: bool = True
+    normalize: bool = True,
+    num_threads: Optional[int] = None
 ) -> TerrainIndex:
     """
     Convenience function to build a terrain index.
-    
+
     Args:
         embeddings: 2D array of embeddings
         metadata: Patch metadata dictionary
@@ -251,13 +259,14 @@ def build_index(
         M: HNSW connections parameter
         ef_construction: Construction accuracy parameter
         normalize: Apply normalization
-        
+        num_threads: Cap on HNSW construction threads (None = all cores)
+
     Returns:
         Built TerrainIndex
     """
     dim = embeddings.shape[1] if len(embeddings.shape) > 1 else 0
-    
+
     index = TerrainIndex(dim=dim, space=space, M=M, ef_construction=ef_construction)
-    index.build(embeddings, metadata, normalize=normalize)
+    index.build(embeddings, metadata, normalize=normalize, num_threads=num_threads)
     
     return index
