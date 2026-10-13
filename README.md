@@ -318,9 +318,11 @@ python -u county_worker.py --worker-id 0 --n-workers 8 --main-log build.log   # 
 ```
 
 Tiles are filtered for constant-valued (nodata-fill) patches at tiling time,
-and the SNR feature of the rich analysis vector is log-scaled; both are
-index-compatibility events, so indices built before 2026-10-11 are not
-query-compatible with the current code.
+the SNR feature of the rich analysis vector is log-scaled, and the 13
+amplitude-scaled analysis statistics (mean, std, energy, band energies, ...)
+are signed-log1p compressed so that a few extreme patches cannot dominate
+z-score normalization. All three are index-compatibility events, so indices
+built before 2026-10-12 are not query-compatible with the current code.
 
 The path constants at the top of `build_county_index.py` are currently
 hardcoded for a Windows workstation; if you're running elsewhere, edit

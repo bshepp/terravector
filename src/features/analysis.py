@@ -9,6 +9,10 @@ Analyzes:
 - Spatial autocorrelation (Moran's I)
 - Frequency content (low/mid/high bands)
 - Feature distinctness (SNR)
+
+Amplitude-scaled statistics are signed-log1p compressed in
+``analysis_to_vector`` (see ``LOG_SCALED_KEYS``); ``analyze_features`` itself
+returns raw values.
 """
 
 import numpy as np
@@ -225,11 +229,32 @@ def compute_feature_snr(arr: np.ndarray, percentile: float = 95) -> float:
     return float(np.log1p(np.std(signal_values) / noise_std))
 
 
+# Keys whose raw values are amplitude-scaled residual statistics with
+# intrinsically heavy tails (a residual field can span 1e-6 .. 1e3 across
+# terrain). Stored raw, z-score normalization lets a handful of extreme
+# patches set the per-dimension scale and squashes everyone else near zero
+# (energy: 98.8% of county patches at |z| < 0.05 before this change).
+# signed_log1p compresses the tails while keeping sign and monotonicity.
+# Changing this set is an index-compat event; see CLAUDE.md.
+LOG_SCALED_KEYS = (
+    'mean', 'std', 'range', 'median', 'skewness', 'kurtosis', 'energy',
+    'low_freq_energy', 'mid_freq_energy', 'high_freq_energy',
+    'freq_ratio_high_low', 'min', 'max',
+)
+
+
+def signed_log1p(x):
+    """sign(x) * log1p(|x|): odd, monotonic, identity near 0, log for |x| >> 1."""
+    return np.sign(x) * np.log1p(np.abs(x))
+
+
 def analysis_to_vector(analysis: Dict[str, float]) -> np.ndarray:
     """
     Convert analysis dict to fixed-length feature vector.
-    
-    Returns 20-dimensional vector with standardized order.
+
+    Returns 20-dimensional vector with standardized order. Keys listed in
+    ``LOG_SCALED_KEYS`` are passed through ``signed_log1p`` so that their
+    heavy tails do not dominate z-score normalization at index build time.
     """
     keys = [
         'mean', 'std', 'range', 'median', 'skewness', 'kurtosis',
@@ -238,16 +263,31 @@ def analysis_to_vector(analysis: Dict[str, float]) -> np.ndarray:
         'low_freq_energy', 'mid_freq_energy', 'high_freq_energy', 'freq_ratio_high_low',
         'feature_snr', 'min', 'max'
     ]
-    
+
     # Pad to 20 dimensions
     while len(keys) < 20:
         keys.append(f'reserved_{len(keys)}')
-    
+
     vector = []
     for key in keys[:20]:
-        vector.append(float(analysis.get(key, 0.0)))
-    
+        value = float(analysis.get(key, 0.0))
+        if key in LOG_SCALED_KEYS:
+            value = float(signed_log1p(value))
+        vector.append(value)
+
     return np.array(vector, dtype=np.float32)
+
+
+def get_log_scaled_dims() -> List[int]:
+    """Indices (0..19) of the analysis-vector slots that are signed-log1p scaled."""
+    keys = [
+        'mean', 'std', 'range', 'median', 'skewness', 'kurtosis',
+        'energy', 'entropy', 'spatial_autocorr',
+        'linear_feature_count', 'max_linear_strength', 'mean_linear_strength',
+        'low_freq_energy', 'mid_freq_energy', 'high_freq_energy', 'freq_ratio_high_low',
+        'feature_snr', 'min', 'max', 'reserved_19'
+    ]
+    return [i for i, k in enumerate(keys) if k in LOG_SCALED_KEYS]
 
 
 def get_analysis_dim() -> int:
@@ -258,10 +298,10 @@ def get_analysis_dim() -> int:
 def get_analysis_labels() -> List[str]:
     """Get labels for analysis vector dimensions."""
     return [
-        'mean', 'std', 'range', 'median', 'skewness', 'kurtosis',
-        'energy', 'entropy', 'spatial_autocorr',
+        'slog_mean', 'slog_std', 'slog_range', 'slog_median', 'slog_skewness', 'slog_kurtosis',
+        'slog_energy', 'entropy', 'spatial_autocorr',
         'linear_count', 'linear_max', 'linear_mean',
-        'freq_low', 'freq_mid', 'freq_high', 'freq_ratio',
-        'log_snr', 'min', 'max', 'reserved'
+        'slog_freq_low', 'slog_freq_mid', 'slog_freq_high', 'slog_freq_ratio',
+        'log_snr', 'slog_min', 'slog_max', 'reserved'
     ]
 
