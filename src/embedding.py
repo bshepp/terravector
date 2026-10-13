@@ -694,7 +694,24 @@ def get_embedding_labels_from_config(config: 'SignatureConfig') -> List[str]:
     if config.texture.enabled:
         from .features.texture import get_texture_labels
         labels.extend(get_texture_labels(config.texture.features))
-    
+
+    # Residuals labels: decomp × upsamp × slot × per-slot analysis dims, in the
+    # same nesting order as compute_residuals_embedding. Slot "A" is the
+    # down→up round trip; slot "AB" is the (A − B) asymmetry when bidirectional.
+    if config.residuals.enabled:
+        r = config.residuals
+        if r.use_rich_analysis:
+            from .features.analysis import get_analysis_labels
+            slot_labels = get_analysis_labels()
+        else:
+            slot_labels = ['mean', 'std', 'energy', 'entropy', 'range', 'median']
+        slots = ['A', 'AB'] if r.bidirectional else ['A']
+        for decomp in r.decomposition_methods:
+            for upsamp in r.upsampling_methods:
+                for slot in slots:
+                    for stat in slot_labels:
+                        labels.append(f"res_{decomp}_{upsamp}_{slot}_{stat}")
+
     # Directional FFT labels
     if config.directional_fft.enabled:
         from .features.directional_fft import get_directional_fft_labels

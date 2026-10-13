@@ -348,6 +348,8 @@ terravector/
 ├── build_county_index.py      # Licking County corpus pipeline (checkpointed)
 ├── county_worker.py           # Parallel helper for the county build
 ├── compare_separability.py    # Sweep residuals signature variants
+├── tests/                     # pytest suite (seconds; no county data needed)
+├── pytest.ini
 ├── sweep_turing.py            # Turing iteration / Pearson (F,k) grid sweeps
 ├── check_coords.py            # Quick "is this point in the corpus?" check
 ├── src/
@@ -387,6 +389,18 @@ terravector/
 ├── data/                      # Test data and outputs (corpus + checkpoints gitignored)
 ├── requirements.txt
 └── LICENSE                    # Apache 2.0
+```
+
+## Testing
+
+A small pytest suite lives in `tests/`. It covers the analysis vector and its
+signed-log1p scaling, the tiling filters (nodata and constant-fill patches),
+HNSW index build/query/save/load including the thread cap, preset validation,
+and single-patch embeddings for the shipped presets. It runs in a few seconds
+and does not touch the county corpus.
+
+```bash
+python -m pytest
 ```
 
 ## Requirements

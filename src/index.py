@@ -45,6 +45,7 @@ class TerrainIndex:
         self.metadata: Dict[int, Dict[str, Any]] = {}
         self.normalization_params: Optional[Dict[str, Any]] = None
         self.signature_config: Optional[Dict[str, Any]] = None  # Signature configuration
+        self._ef_search = 50  # nmslib query-time candidate list size; raised on demand
         self.is_built = False
     
     def build(
@@ -100,7 +101,8 @@ class TerrainIndex:
         self.index.createIndex(index_params, print_progress=False)
         
         self.index.setQueryTimeParams({'efSearch': ef_search})
-        
+        self._ef_search = ef_search
+
         # Store metadata
         self.metadata = metadata
         self.is_built = True
@@ -127,9 +129,14 @@ class TerrainIndex:
         if self.normalization_params is not None:
             embedding = (embedding - self.normalization_params['mean']) / self.normalization_params['std']
         
-        # Query nmslib
+        # Query nmslib. HNSW returns at most efSearch candidates, so a request for
+        # k > efSearch would silently come back short; widen the candidate list.
+        k = min(k, len(self.metadata))
+        if k > self._ef_search:
+            self.index.setQueryTimeParams({'efSearch': k})
+            self._ef_search = k
         embedding = embedding.astype(np.float32).reshape(-1)
-        ids, distances = self.index.knnQuery(embedding, k=min(k, len(self.metadata)))
+        ids, distances = self.index.knnQuery(embedding, k=k)
         
         # Build results with metadata
         results = []
@@ -224,8 +231,9 @@ class TerrainIndex:
         index.metadata = data['metadata']
         index.normalization_params = data['normalization_params']
         index.signature_config = data.get('signature_config')  # May not exist in older indices
+        index.index.setQueryTimeParams({'efSearch': index._ef_search})
         index.is_built = True
-        
+
         return index
     
     def get_stats(self) -> Dict[str, Any]:

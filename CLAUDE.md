@@ -12,7 +12,7 @@ Sibling project: **RESIDUALS** at `F:\science-projects\RESIDUALS` produces the c
 
 ## Common commands
 
-There is **no test suite** and no linter configured. Development is run-and-inspect. Install with `pip install -r requirements.txt` (plus `pip install -e ../RESIDUALS` for a local RESIDUALS checkout).
+Install with `pip install -r requirements.txt` (plus `pip install -e ../RESIDUALS` for a local RESIDUALS checkout). There is a small pytest suite under `tests/` covering the analysis vector and signed-log1p scaling, tiling filters, HNSW index build/query/save/load, preset validation, and single-patch embeddings; run it with `python -m pytest` (a few seconds, light CPU). No linter is configured. County-scale behavior is still verified run-and-inspect.
 
 Main entry points are top-level scripts, each with `--help`:
 
