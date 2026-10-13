@@ -17,11 +17,17 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
+
+try:
+    import psutil
+except ImportError:  # optional: only used to pin affinity / lower priority
+    psutil = None
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -140,6 +146,35 @@ def process_tile(tile_id: str, tiles_dir: Path, config, patch_size: int, min_val
     return embeddings, metadata, dem.shape, diagnostics
 
 
+def apply_core_cap(n_cores: int) -> None:
+    """Confine this process to n_cores: BLAS threads, CPU affinity, low priority.
+
+    The nmslib HNSW thread count is handled separately via build_index(num_threads=...).
+    BLAS env vars only take effect for libraries not yet loaded, so this must run
+    before any heavy numpy work; numpy itself is already imported, but the
+    affinity cap is enforced by the OS regardless.
+    """
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(var, str(n_cores))
+    if psutil is None:
+        print(f"  Core cap: nmslib threads={n_cores} (install psutil for affinity/priority)")
+        return
+    proc = psutil.Process()
+    try:
+        total = psutil.cpu_count(logical=True) or n_cores
+        proc.cpu_affinity(list(range(min(n_cores, total))))
+        if sys.platform == "win32":
+            proc.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        else:
+            proc.nice(10)
+        print(f"  Core cap: {n_cores} of {total} cores, below-normal priority, "
+              f"affinity={proc.cpu_affinity()}")
+    except (psutil.Error, OSError, ValueError) as e:
+        print(f"  Core cap: WARNING could not set affinity/priority ({e}); "
+              f"nmslib threads={n_cores} still applies")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build Licking County HNSW index")
     parser.add_argument("--patch-size", type=int, default=64)
@@ -155,14 +190,19 @@ def main():
     )
     parser.add_argument(
         "--threads", type=int, default=None,
-        help="Cap HNSW construction threads. Default: nmslib uses every core, "
-             "which saturates the machine for the whole Phase 2 build.",
+        help="Cap this build to N cores: nmslib HNSW threads, BLAS threads, CPU "
+             "affinity and below-normal priority (affinity/priority need psutil). "
+             "Default: nmslib uses every core, which saturates the machine for "
+             "the whole Phase 2 build. Always pass this on a shared workstation.",
     )
     args = parser.parse_args()
 
     print("=" * 70)
     print("  Licking County HNSW Index Builder")
     print("=" * 70)
+
+    if args.threads is not None and args.threads > 0:
+        apply_core_cap(args.threads)
 
     county_meta = load_county_metadata(COUNTY_TILES_DIR)
     tile_ids = county_meta["processed_tile_ids"]

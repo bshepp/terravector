@@ -297,7 +297,16 @@ python build_county_index.py --dry-run    # plan only
 python build_county_index.py              # full build (~hours)
 python build_county_index.py --resume     # skip already-checkpointed tiles
 python build_county_index.py --max-tiles 3   # validate the pipeline on a small subset first
+python build_county_index.py --resume --threads 5   # cap the HNSW assembly to 5 cores
 ```
+
+**Always pass `--threads` on a shared workstation.** nmslib builds the HNSW
+graph on every core by default and will absorb any CPU you free up, which
+pins the machine for the whole assembly phase. `--threads N` caps the nmslib
+worker count, pins the process's CPU affinity to N cores, and drops it to
+below-normal priority (the last two need `psutil`; without it only the nmslib
+cap applies). 5 of 20 cores assembled the full county index in a usable
+background run.
 
 The build is **checkpointed per tile** under `data/licking_county/checkpoints/`
 (gitignored), so it's safe to interrupt and resume. A per-tile sidecar

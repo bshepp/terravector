@@ -24,9 +24,9 @@ python cli.py query terrain.idx --coords y,x --k 10
 python cli.py info terrain.idx
 
 # Full-county corpus build (long-running, checkpointed per tile)
-python build_county_index.py --resume
+python build_county_index.py --resume --threads 5   # ALWAYS cap threads; see note below
 python build_county_index.py --dry-run
-python build_county_index.py --max-tiles 3   # validation subset (~25 min)
+python build_county_index.py --max-tiles 3 --threads 5   # validation subset (~25 min)
 # Parallel helper: run N of these alongside the main build (see its docstring)
 python -u county_worker.py --worker-id 0 --n-workers 8 --main-log build.log
 
@@ -44,6 +44,8 @@ python -m src.similarity_raster data/licking_county/licking_county.idx --patch 5
 ```
 
 `build_county_index.py` writes per-tile `.npz` checkpoints under `data/licking_county/checkpoints/` and is safe to interrupt. `--resume` skips already-checkpointed tiles. The final index is a single unified HNSW across all 858,642 patches (200 tiles × up to 66×66 patches each at patch_size=64, after dropping nodata and constant-fill patches). The embedding pass is single-threaded at ~15 min/tile; `county_worker.py` fills idle cores and writes the same checkpoints.
+
+**Never run the Phase 2 assembly without `--threads`.** nmslib's HNSW construction uses every core by default and expands into any CPU the user frees up; on 2026-10-12 it pinned the 20-core workstation and the user had to hard-shut-down mid-build. `--threads N` sets nmslib `indexThreadQty`, pins CPU affinity to N cores, and lowers process priority (affinity/priority via `psutil`, optional). The 2026-10-13 recovery rebuild ran at `--threads 5`. The same rule applies to anything else CPU-heavy: one job at a time, capped, and the user decides when long jobs launch.
 
 ## Architecture
 
