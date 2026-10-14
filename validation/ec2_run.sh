@@ -32,7 +32,9 @@ python -c "import residuals, numpy, scipy, skimage, cv2, pywt; print('imports ok
 push_log
 
 mkdir -p /root/tiles_q /root/out
-aws s3 sync s3://$BUCKET/$PREFIX/tiles_q/ /root/tiles_q/ --only-show-errors
+# wait for the uploader to mark the tile set complete
+until aws s3 ls s3://$BUCKET/$PREFIX/tiles_q/_COMPLETE >/dev/null 2>&1; do echo "waiting for tiles... $(date -u)"; sleep 60; done
+aws s3 sync s3://$BUCKET/$PREFIX/tiles_q/ /root/tiles_q/ --only-show-errors --exclude _COMPLETE
 echo "tiles: $(ls /root/tiles_q | wc -l)"
 push_log
 

@@ -1,0 +1,11 @@
+[
+ {"name":"Great Circle wall E","x":1988395,"y":743402,"cls":"wall","site":"newark_gc"},
+ {"name":"Great Circle wall W","x":1987195,"y":743402,"cls":"wall","site":"newark_gc"},
+ {"name":"Octagon neck","x":1983446,"y":747956,"cls":"wall","site":"newark_oct"},
+ {"name":"Observatory Mound","x":1982444,"y":747086,"cls":"wall","site":"newark_oct"},
+ {"name":"Wright wall","x":1989975,"y":746103,"cls":"wall","site":"newark_wright"},
+ {"name":"Alligator Mound","x":1968220,"y":753917,"cls":"mound","site":"alligator"},
+ {"name":"Eagle Mound","x":1987795,"y":743402,"cls":"mound","site":"newark_gc"},
+ {"name":"Dixon Mound","x":1961680,"y":820090,"cls":"mound","site":"dixon"},
+ {"name":"Flint Ridge pits","x":2035748,"y":725009,"cls":"pits","site":"flint_ridge"}
+]
