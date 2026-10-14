@@ -45,6 +45,8 @@ TERRAVECTOR_INDEX=path/to/licking_county.idx uvicorn api:app
 python -m src.similarity_raster data/licking_county/licking_county.idx --patch 311270 -o out.tif
 ```
 
+Two county indices exist: `licking_county.idx` (64 px, 858,642 patches) and `licking_county_p128.idx` (128 px, 215,169 patches, assembled 2026-10-14 from EC2-computed vectors via `validation/assemble_index_from_vectors.py`). **Serve the 128 px one**; the validation protocol showed 64 px is the weakest configuration. Everything downstream reads `patch_size` from `corpus.json`.
+
 `build_county_index.py` writes per-tile `.npz` checkpoints under `data/licking_county/checkpoints/` and is safe to interrupt. `--resume` skips already-checkpointed tiles. The final index is a single unified HNSW across all 858,642 patches (200 tiles × up to 66×66 patches each at patch_size=64, after dropping nodata and constant-fill patches). The embedding pass is single-threaded at ~15 min/tile; `county_worker.py` fills idle cores and writes the same checkpoints.
 
 **Never run the Phase 2 assembly without `--threads`.** nmslib's HNSW construction uses every core by default and expands into any CPU the user frees up; on 2026-10-12 it pinned the 20-core workstation and the user had to hard-shut-down mid-build. `--threads N` sets nmslib `indexThreadQty`, pins CPU affinity to N cores, and lowers process priority (affinity/priority via `psutil`, optional). The 2026-10-13 recovery rebuild ran at `--threads 5`. The same rule applies to anything else CPU-heavy: one job at a time, capped, and the user decides when long jobs launch.

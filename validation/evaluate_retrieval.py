@@ -2,7 +2,8 @@
 
 Sources of per-patch vectors (all evaluated with the same protocol):
 
-  --source index            the county index (.meta embeddings, stored z-score params)
+  --source index            the county index (.meta embeddings, stored z-score params);
+                            --meta selects another .meta (e.g. the 128 px index)
   --source <npz_dir>        a baseline directory from baseline_features.py
                             (one <tile>.npz per tile; z-scored here over finite rows)
   --pool3                   average each cell's vector with its 3x3 neighbours
@@ -79,10 +80,10 @@ class Grid:
         return out
 
 
-def load_index_vectors(grid: Grid):
+def load_index_vectors(grid: Grid, meta_path: Path = META):
     import pickle
     # The .meta file is produced by this project's own build (trusted input; see CLAUDE.md).
-    with open(META, "rb") as f:
+    with open(meta_path, "rb") as f:
         data = pickle.load(f)
     emb = data["embeddings"]
     meta = data["metadata"]
@@ -119,6 +120,7 @@ def main():
     ap.add_argument("--source", required=True)
     ap.add_argument("--patch-size", type=int, default=64)
     ap.add_argument("--pool3", action="store_true")
+    ap.add_argument("--meta", default=str(META), help="index .meta file when --source index")
     ap.add_argument("--sites", default=str(ROOT / "validation" / "gt_sites.json"))
     ap.add_argument("--controls", default=str(ROOT / "validation" / "probe_sites.json"))
     ap.add_argument("--n-random", type=int, default=500)
@@ -133,7 +135,7 @@ def main():
     grid = Grid(bridge, a.patch_size)
     t0 = time.time()
     if a.source == "index":
-        X, mean, std = load_index_vectors(grid)
+        X, mean, std = load_index_vectors(grid, Path(a.meta))
     else:
         X, mean, std = load_npz_vectors(grid, Path(a.source))
     placed = np.isfinite(X).all(1)

@@ -121,10 +121,10 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
 
 ### Next steps, in order of value per hour
 
-- Assemble a 128 px county index from the vectors already computed
-  (`s3://3body-compute-290318/terravector/baselines/full_p128/`, 200 tiles x
-  up to 1,089 patches) and make it the served index; try 3x3 pooling at serve
-  time. No re-embedding needed.
+- Done 2026-10-14: `data/licking_county/licking_county_p128.idx` assembled from the
+  EC2 vectors (`validation/assemble_index_from_vectors.py`, 215,169 patches,
+  143 s HNSW build on 4 cores); `validation/results/eval_index_p128*.json`
+  reproduces the vector-level numbers. Pooling at serve time is still open.
 - Multi-scale: 256 px and a 128 px / 64 px concatenation; 32 px for the wall
   cross-section.
 - More positives (OAI access, Salisbury 1862 georeferencing) and controls

@@ -285,6 +285,23 @@ python check_coords.py --lat 40.0410 --lon -82.4311 \
     --corpus data/licking_county/licking_county.corpus.json
 ```
 
+## Which county index to serve
+
+Two county indices exist locally (both gitignored):
+
+| file | patch | cells | built | use |
+|---|---|---|---|---|
+| `data/licking_county/licking_county.idx` | 64 px (160 ft) | 858,642 | 2026-10-13 | legacy; weakest configuration in the validation |
+| `data/licking_county/licking_county_p128.idx` | 128 px (320 ft) | 215,169 | 2026-10-14 | **recommended** — ~2x the retrieval of the 64 px index on the ground-truth protocol |
+
+The 128 px index was assembled from vectors computed on EC2 with
+`validation/baseline_features.py --mode full --patch-size 128` and
+`validation/assemble_index_from_vectors.py` (HNSW over 215k vectors builds in
+about 2.5 minutes on 4 cores). Point it at the API with
+`TERRAVECTOR_INDEX=data/licking_county/licking_county_p128.idx`; the bridge,
+raster endpoint and `check_coords.py` read the patch size from its
+`corpus.json`, so raster cells become 320 ft.
+
 ## Building the Licking County corpus
 
 `build_county_index.py` is the production pipeline that turns the RESIDUALS
