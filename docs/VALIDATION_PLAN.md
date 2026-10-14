@@ -62,18 +62,36 @@ percentile by construction.
 | Observatory Mound | 100.0 | 100.0 | 100.0 | 99.8 | 89.0 | 97.2 | 73.8 | 43.5 | 89.8 | 72.0 | 98.1 | 97.6 |
 | Alligator Mound | 91.8 | 94.8 | 93.6 | 100.0 | 95.7 | 97.6 | 80.8 | 59.9 | 95.4 | 92.7 | 96.6 | 92.9 |
 
-Reading: wall-type queries (Great Circle, Observatory Mound) retrieve the other
+Reading: wall-type queries (Great Circle, Observatory Mound) put the other
 Newark walls and the Alligator effigy at the 99.6-100th percentile, while the
-five controls range 27-98. The low-relief Wright remnant and the conical Dixon
-Mound are not retrieved by wall queries (78-97), which is what you would expect
-if the embedding is texture-specific rather than "anything anthropogenic". The
-Alligator query discriminates poorly (everything 80-98).
+five hand-picked controls range 27-98. That looked encouraging, but the full
+protocol below shows how little a 99.6th-percentile block means.
 
-This is encouraging but it is five queries and five controls, and 99.6th
-percentile still means roughly 3,400 county cells score at least as high. It is
-not yet a determination. The script and site list are `validation/probe_retrieval.py`
-and `validation/probe_sites.json`; results are `validation/probe_results_2026-10-13.json`.
-The corrected Great Circle wall raster is `data/licking_county/great_circle_wall_similarity_2026-10-13.tif` (gitignored).
+### Full protocol on the production index (2026-10-13, `validation/evaluate_retrieval.py`)
+
+All nine ground-truth sites as queries, own site masked within 1,500 ft, 500
+uniformly random 3x3 control blocks per query. Hits = other sites whose 3x3
+block intersects the query's top-k cells (8 other sites at most).
+
+| vectors | mean pct of other sites | random block median / p90 | wall-to-wall pct | mean hits @1k / @10k | mean AP |
+|---|---|---|---|---|---|
+| index, 640-d, single cell | 90.0 | 85.3 / 98.3 | 94.2 | 0.56 / 1.78 | 0.0004 |
+| index, 3x3 pooled | 78.2 | 70.0 / ~97 | 98.3 | 0.33 / 1.56 | 0.0003 |
+
+The best of nine random cells already sits at the 85th percentile and one
+random block in ten reaches the 98th, so a positive at 99.6 is a weak
+enrichment, not a retrieval. No ground-truth site ever appears in another
+site's top 100 cells; about one in two appears in the top 1,000 (0.1% of the
+county). Pooling 3x3 neighbourhoods sharpens wall-to-wall similarity (98.3 vs a
+random median of 70) but does not produce top-k hits either. Conical mounds
+and the pit field are not retrieved by anything. Per-query tables are in
+`validation/results/eval_index_p64*.json`.
+
+Current determination: **the 64 px residual-texture embedding, as indexed,
+does not retrieve earthworks at a usable precision. It shows a weak wall-to-wall
+enrichment.** Whether the decomposition adds anything over plain terrain
+statistics, and whether a larger patch helps, is what the baseline runs decide
+(section 3, items 3-4; running on EC2 2026-10-13/14).
 
 ## 3. What a determination needs
 
