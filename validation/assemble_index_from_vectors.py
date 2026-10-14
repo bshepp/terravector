@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--M", type=int, default=16)
     ap.add_argument("--ef-construction", type=int, default=200)
+    ap.add_argument("--pool", type=int, default=0, help="neighbourhood radius to mean-pool stored vectors (1 = 3x3); z-score params come from the unpooled vectors")
     a = ap.parse_args()
 
     from build_county_index import apply_core_cap
@@ -68,10 +69,20 @@ def main():
         tile_info[tid] = {"tile_row": int(tid[1:3]), "tile_col": int(tid[5:7]), "tile_shape": shape,
                           "n_patches": local, "global_id_start": start}
     emb = np.vstack(all_emb)
+    norm_params = None
+    if a.pool > 0:
+        from src.pooling import grid_cells, pool_vectors
+        cm = base["county_metadata"]
+        ppt = int(round(cm["tile_size_ft"] / cm["resolution_ft"])) // ps
+        rows, cols = grid_cells(all_meta, tile_info, cm["grid_rows"], ppt, ps)
+        mean = emb.mean(axis=0, dtype=np.float64); std = emb.std(axis=0, dtype=np.float64)
+        norm_params = {"mean": mean, "std": std}
+        emb = pool_vectors(emb, rows, cols, (cm["grid_rows"] * ppt, cm["grid_cols"] * ppt), radius=a.pool)
+        print(f"pooled vectors over a {2*a.pool+1}x{2*a.pool+1} neighbourhood; z-score params from unpooled vectors", flush=True)
     print(f"{len(files)} tiles, {emb.shape[0]:,} patches x {emb.shape[1]} dims; building HNSW with {a.threads} threads", flush=True)
     t0 = time.time()
     index = build_index(emb, all_meta, space=config.space, M=a.M, ef_construction=a.ef_construction,
-                        normalize=config.normalize, num_threads=a.threads)
+                        normalize=config.normalize, num_threads=a.threads, normalization_params=norm_params)
     index.signature_config = config.to_dict()
     print(f"built in {time.time()-t0:.0f}s", flush=True)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +98,7 @@ def main():
         "signature_types": base.get("signature_types", ["residuals"]),
         "space": config.space, "M": a.M, "ef_construction": a.ef_construction,
         "normalized": config.normalize,
+        "pooling": {"radius": a.pool, "kind": "mean over placed neighbours; z-score params from unpooled vectors"} if a.pool else None,
         "diagnostics": {"totals": {}, "by_tile": {}, "note": "not recorded by baseline_features.py"},
     }
     json.dump(corpus, open(Path(a.out).with_suffix(".corpus.json"), "w"), indent=2, default=str)

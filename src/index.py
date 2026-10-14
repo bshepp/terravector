@@ -54,7 +54,8 @@ class TerrainIndex:
         metadata: Dict[int, Dict[str, Any]],
         normalize: bool = True,
         ef_search: int = 50,
-        num_threads: Optional[int] = None
+        num_threads: Optional[int] = None,
+        normalization_params: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Build the index from embeddings.
@@ -67,6 +68,11 @@ class TerrainIndex:
             num_threads: Cap on HNSW construction threads. None lets nmslib
                 use every core, which saturates a workstation for the whole
                 build; pass a small number to leave the machine usable.
+            normalization_params: Optional {'mean', 'std'} to use instead of
+                statistics computed from ``embeddings``. Used when the stored
+                vectors are neighbourhood-pooled: z-scoring with the unpooled
+                statistics keeps queries from single (unpooled) patches on the
+                same scale as the corpus.
         """
         n_items = len(embeddings)
         
@@ -78,8 +84,12 @@ class TerrainIndex:
         
         # Normalize if requested
         if normalize:
-            mean = np.mean(embeddings, axis=0)
-            std = np.std(embeddings, axis=0)
+            if normalization_params is not None:
+                mean = np.asarray(normalization_params['mean'], dtype=np.float64)
+                std = np.asarray(normalization_params['std'], dtype=np.float64).copy()
+            else:
+                mean = np.mean(embeddings, axis=0)
+                std = np.std(embeddings, axis=0)
             std[std == 0] = 1
             normalized = (embeddings - mean) / std
             self.normalization_params = {'mean': mean, 'std': std}
@@ -255,7 +265,8 @@ def build_index(
     M: int = 16,
     ef_construction: int = 200,
     normalize: bool = True,
-    num_threads: Optional[int] = None
+    num_threads: Optional[int] = None,
+    normalization_params: Optional[Dict[str, Any]] = None,
 ) -> TerrainIndex:
     """
     Convenience function to build a terrain index.
@@ -268,6 +279,7 @@ def build_index(
         ef_construction: Construction accuracy parameter
         normalize: Apply normalization
         num_threads: Cap on HNSW construction threads (None = all cores)
+        normalization_params: Optional precomputed {'mean', 'std'} (see TerrainIndex.build)
 
     Returns:
         Built TerrainIndex
@@ -275,6 +287,7 @@ def build_index(
     dim = embeddings.shape[1] if len(embeddings.shape) > 1 else 0
 
     index = TerrainIndex(dim=dim, space=space, M=M, ef_construction=ef_construction)
-    index.build(embeddings, metadata, normalize=normalize, num_threads=num_threads)
+    index.build(embeddings, metadata, normalize=normalize, num_threads=num_threads,
+                normalization_params=normalization_params)
     
     return index

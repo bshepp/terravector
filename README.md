@@ -292,13 +292,20 @@ Two county indices exist locally (both gitignored):
 | file | patch | cells | built | use |
 |---|---|---|---|---|
 | `data/licking_county/licking_county.idx` | 64 px (160 ft) | 858,642 | 2026-10-13 | legacy; weakest configuration in the validation |
-| `data/licking_county/licking_county_p128.idx` | 128 px (320 ft) | 215,169 | 2026-10-14 | **recommended** — ~2x the retrieval of the 64 px index on the ground-truth protocol |
+| `data/licking_county/licking_county_p128.idx` | 128 px (320 ft) | 215,169 | 2026-10-14 | ~2x the retrieval of the 64 px index on the ground-truth protocol |
+| `data/licking_county/licking_county_p128_pool3.idx` | 128 px, 3x3 pooled | 215,169 | 2026-10-14 | **recommended** — best configuration tested: mean AP 0.013, 10/16 wall pairs above the 99.5th percentile |
 
 The 128 px index was assembled from vectors computed on EC2 with
 `validation/baseline_features.py --mode full --patch-size 128` and
 `validation/assemble_index_from_vectors.py` (HNSW over 215k vectors builds in
-about 2.5 minutes on 4 cores). Point it at the API with
-`TERRAVECTOR_INDEX=data/licking_county/licking_county_p128.idx`; the bridge,
+about 2.5 minutes on 4 cores). The pooled variant adds `--pool 1`: each stored vector is the mean of its 3x3
+neighbourhood on the county grid, while the z-score parameters are kept from
+the unpooled vectors (`src/pooling.py`; `corpus.json` records `pooling`).
+Queries by patch id or coordinates use the stored pooled vectors, so they are
+consistent. A query embedded from a single external chip is unpooled and will
+score slightly differently against a pooled corpus; pool its 3x3 neighbourhood
+first if you have it. Point the API at an index with
+`TERRAVECTOR_INDEX=data/licking_county/licking_county_p128_pool3.idx`; the bridge,
 raster endpoint and `check_coords.py` read the patch size from its
 `corpus.json`, so raster cells become 320 ft.
 

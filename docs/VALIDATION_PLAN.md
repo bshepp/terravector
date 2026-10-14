@@ -124,7 +124,10 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
 - Done 2026-10-14: `data/licking_county/licking_county_p128.idx` assembled from the
   EC2 vectors (`validation/assemble_index_from_vectors.py`, 215,169 patches,
   143 s HNSW build on 4 cores); `validation/results/eval_index_p128*.json`
-  reproduces the vector-level numbers. Pooling at serve time is still open.
+  reproduces the vector-level numbers. Serve-time pooling done the same day:
+  `licking_county_p128_pool3.idx` (`src/pooling.py`, z-score params from the
+  unpooled vectors) reproduces the pooled row above as served
+  (`validation/results/eval_index_p128_pool3_served.json`, mean AP 0.0133).
 - Multi-scale: 256 px and a 128 px / 64 px concatenation; 32 px for the wall
   cross-section.
 - More positives (OAI access, Salisbury 1862 georeferencing) and controls
