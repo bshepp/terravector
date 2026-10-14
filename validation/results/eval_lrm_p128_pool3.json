@@ -1,0 +1,271 @@
+{
+ "source": "C:/Users/Snarf/AppData/Local/Temp/claude/F--science-projects-RESIDUALS/69fac886-b546-4f58-99b4-da22c1a522a8/scratchpad/baselines/lrm_p128",
+ "pool3": true,
+ "patch_size": 128,
+ "queries": {
+  "Great Circle wall E": {
+   "cls": "wall",
+   "others": {
+    "Octagon neck": 98.98279869827988,
+    "Observatory Mound": 99.13993491399349,
+    "Wright wall": 99.3072989307299,
+    "Alligator Mound": 88.75639237563924,
+    "Dixon Mound": 99.85402138540213,
+    "Flint Ridge pits": 87.85867038586703
+   },
+   "AP": 0.0014000858898369063,
+   "hits": {
+    "100": 0,
+    "1000": 1,
+    "10000": 4
+   },
+   "n_others": 6,
+   "controls_pct": [
+    55.012087401208746,
+    97.32264063226407,
+    68.0557880055788,
+    88.90423059042305,
+    89.1999070199907
+   ],
+   "random_pct_median": 72.97559274755928,
+   "random_pct_p90": 96.75992561599256
+  },
+  "Great Circle wall W": {
+   "cls": "wall",
+   "others": {
+    "Octagon neck": 98.84611808461182,
+    "Observatory Mound": 99.99488609948861,
+    "Wright wall": 95.68572756857276,
+    "Alligator Mound": 81.73221757322176,
+    "Dixon Mound": 99.20130172013017,
+    "Flint Ridge pits": 95.72849837284984
+   },
+   "AP": 0.014471957607540746,
+   "hits": {
+    "100": 1,
+    "1000": 1,
+    "10000": 5
+   },
+   "n_others": 6,
+   "controls_pct": [
+    93.6001859600186,
+    82.20409112040912,
+    96.19944211994421,
+    79.56810785681078,
+    74.05206880520689
+   ],
+   "random_pct_median": 73.95374244537425,
+   "random_pct_p90": 96.3353788935379
+  },
+  "Octagon neck": {
+   "cls": "wall",
+   "others": {
+    "Great Circle wall E": 99.54067875406788,
+    "Great Circle wall W": 99.0697350069735,
+    "Wright wall": 98.14086471408648,
+    "Alligator Mound": 62.42538354253835,
+    "Eagle Mound": 99.39748953974895,
+    "Dixon Mound": 98.16317991631799,
+    "Flint Ridge pits": 96.98372849837284
+   },
+   "AP": 0.0010464341827329565,
+   "hits": {
+    "100": 0,
+    "1000": 1,
+    "10000": 6
+   },
+   "n_others": 7,
+   "controls_pct": [
+    89.83914458391446,
+    91.71315667131566,
+    92.21989772198978,
+    47.62900976290098,
+    69.43933054393305
+   ],
+   "random_pct_median": 69.8795908879591,
+   "random_pct_p90": 97.16759646675965
+  },
+  "Observatory Mound": {
+   "cls": "wall",
+   "others": {
+    "Great Circle wall E": 97.95908879590888,
+    "Great Circle wall W": 99.12831241283125,
+    "Wright wall": 96.28963272896327,
+    "Alligator Mound": 41.176662017666196,
+    "Eagle Mound": 99.63458856345886,
+    "Dixon Mound": 99.57322175732217,
+    "Flint Ridge pits": 97.43235704323571
+   },
+   "AP": 0.0010955976137197443,
+   "hits": {
+    "100": 0,
+    "1000": 2,
+    "10000": 6
+   },
+   "n_others": 7,
+   "controls_pct": [
+    97.4653649465365,
+    57.318456531845655,
+    98.73082287308229,
+    34.80567178056718,
+    47.04044630404462
+   ],
+   "random_pct_median": 65.90771734077174,
+   "random_pct_p90": 97.14700139470014
+  },
+  "Wright wall": {
+   "cls": "wall",
+   "others": {
+    "Great Circle wall E": 99.71548249427013,
+    "Great Circle wall W": 84.7202012078047,
+    "Octagon neck": 97.41284326897596,
+    "Observatory Mound": 81.17581973119604,
+    "Alligator Mound": 83.58585036796667,
+    "Eagle Mound": 95.1715705645255,
+    "Dixon Mound": 94.64112207753567,
+    "Flint Ridge pits": 71.91598365419037
+   },
+   "AP": 0.000406726066957456,
+   "hits": {
+    "100": 0,
+    "1000": 1,
+    "10000": 2
+   },
+   "n_others": 8,
+   "controls_pct": [
+    39.756207549011854,
+    99.5141817099874,
+    46.394949349375416,
+    85.0902599244076,
+    94.65367432043553
+   ],
+   "random_pct_median": 73.87483089339426,
+   "random_pct_p90": 97.52585994486311
+  },
+  "Alligator Mound": {
+   "cls": "mound",
+   "others": {
+    "Great Circle wall E": 61.85977749987215,
+    "Great Circle wall W": 51.73616115220292,
+    "Octagon neck": 62.767723069627756,
+    "Observatory Mound": 55.95603925597743,
+    "Wright wall": 79.56634325270454,
+    "Eagle Mound": 56.98253378645381,
+    "Dixon Mound": 72.12518770252115,
+    "Flint Ridge pits": 76.91503061352574
+   },
+   "AP": 5.496730449291767e-05,
+   "hits": {
+    "100": 0,
+    "1000": 0,
+    "10000": 0
+   },
+   "n_others": 8,
+   "controls_pct": [
+    21.624725129125387,
+    76.1419054304722,
+    58.61432536343392,
+    98.18317906471844,
+    99.39005397464446
+   ],
+   "random_pct_median": 68.84556557152222,
+   "random_pct_p90": 97.71595669011302
+  },
+  "Eagle Mound": {
+   "cls": "mound",
+   "others": {
+    "Octagon neck": 99.4974430497443,
+    "Observatory Mound": 99.98233379823338,
+    "Wright wall": 96.14551371455137,
+    "Alligator Mound": 70.65132496513249,
+    "Dixon Mound": 99.36541143654114,
+    "Flint Ridge pits": 98.50534635053464
+   },
+   "AP": 0.005271243607910432,
+   "hits": {
+    "100": 1,
+    "1000": 1,
+    "10000": 5
+   },
+   "n_others": 6,
+   "controls_pct": [
+    96.68107856810786,
+    76.5118549511855,
+    97.81032078103208,
+    70.48303114830313,
+    68.61273826127383
+   ],
+   "random_pct_median": 74.46187819618783,
+   "random_pct_p90": 96.99609483960948
+  },
+  "Dixon Mound": {
+   "cls": "mound",
+   "others": {
+    "Great Circle wall E": 98.25987103612755,
+    "Great Circle wall W": 99.76615418946625,
+    "Octagon neck": 96.2803174352275,
+    "Observatory Mound": 99.95350977921794,
+    "Wright wall": 86.81723299503949,
+    "Alligator Mound": 95.03716893151525,
+    "Eagle Mound": 99.26313000060438,
+    "Flint Ridge pits": 98.05624386910213
+   },
+   "AP": 0.002464047189899222,
+   "hits": {
+    "100": 0,
+    "1000": 2,
+    "10000": 6
+   },
+   "n_others": 8,
+   "controls_pct": [
+    57.12206937270745,
+    92.59596743824936,
+    99.53649249880287,
+    91.33096853076955,
+    94.05297095755908
+   ],
+   "random_pct_median": 74.13888488556432,
+   "random_pct_p90": 97.36149400973505
+  },
+  "Flint Ridge pits": {
+   "cls": "pits",
+   "others": {
+    "Great Circle wall E": 90.30404463040446,
+    "Great Circle wall W": 96.90004649000466,
+    "Octagon neck": 95.50627615062761,
+    "Observatory Mound": 98.91864249186425,
+    "Wright wall": 96.12691771269178,
+    "Alligator Mound": 21.254765225476525,
+    "Eagle Mound": 97.8837749883775,
+    "Dixon Mound": 96.2143189214319
+   },
+   "AP": 0.00042670298583549494,
+   "hits": {
+    "100": 0,
+    "1000": 0,
+    "10000": 6
+   },
+   "n_others": 8,
+   "controls_pct": [
+    99.3207810320781,
+    47.54393305439331,
+    96.41097164109716,
+    56.8884239888424,
+    50.80567178056719
+   ],
+   "random_pct_median": 70.21943282194329,
+   "random_pct_p90": 97.18712226871223
+  }
+ },
+ "summary": {
+  "mean_AP": 0.002959751383213986,
+  "mean_hits": {
+   "100": 0.2222222222222222,
+   "1000": 1.0,
+   "10000": 4.444444444444445
+  },
+  "mean_other_pct": 88.85844136346165,
+  "mean_random_pct_median": 71.5841373100307,
+  "wall_to_wall_pct": 96.56933896317216
+ }
+}

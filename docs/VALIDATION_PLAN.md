@@ -67,31 +67,69 @@ Newark walls and the Alligator effigy at the 99.6-100th percentile, while the
 five hand-picked controls range 27-98. That looked encouraging, but the full
 protocol below shows how little a 99.6th-percentile block means.
 
-### Full protocol on the production index (2026-10-13, `validation/evaluate_retrieval.py`)
+### Full protocol (2026-10-13/14, `validation/evaluate_retrieval.py`)
 
 All nine ground-truth sites as queries, own site masked within 1,500 ft, 500
-uniformly random 3x3 control blocks per query. Hits = other sites whose 3x3
-block intersects the query's top-k cells (8 other sites at most).
+uniformly random 3x3 control blocks per query. "Other sites" are the eight
+sites not sharing the query's own complex. Hits are counted at fractions of
+the county so 64 px and 128 px grids are comparable (top 0.1% = ~860 cells at
+64 px, ~215 cells at 128 px). Baselines were computed on an EC2 c7a.8xlarge
+(`validation/ec2_run.sh`; 53 + 7 minutes, under $3) from the same tiles.
 
-| vectors | mean pct of other sites | random block median / p90 | wall-to-wall pct | mean hits @1k / @10k | mean AP |
-|---|---|---|---|---|---|
-| index, 640-d, single cell | 90.0 | 85.3 / 98.3 | 94.2 | 0.56 / 1.78 | 0.0004 |
-| index, 3x3 pooled | 78.2 | 70.0 / ~97 | 98.3 | 0.33 / 1.56 | 0.0003 |
+| vectors | patch | other sites: mean pct | random block median | wall-to-wall pct | sites in top 0.1% (of 8) | top 0.5% | mean AP |
+|---|---|---|---|---|---|---|---|
+| simple terrain stats (12-d) | 64 | 85.0 | 85.2 | 96.3 | 0.00 | 0.56 | 0.0001 |
+| simple terrain stats, 3x3 pooled | 64 | 71.0 | 70.8 | 85.2 | 0.22 | 0.33 | 0.0001 |
+| analysis vector on plain LRM (40-d) | 64 | 91.4 | 86.2 | 93.7 | 0.22 | 1.44 | 0.0004 |
+| same, 3x3 pooled | 64 | 84.8 | 72.6 | 95.8 | 0.11 | 0.33 | 0.0001 |
+| **production index (640-d)** | 64 | 90.0 | 85.3 | 94.2 | 0.56 | 1.11 | 0.0004 |
+| production index, 3x3 pooled | 64 | 78.2 | 70.0 | 98.3 | 0.33 | 1.22 | 0.0003 |
+| simple terrain stats | 128 | 82.7 | 83.5 | 94.4 | 0.00 | 0.33 | 0.0005 |
+| simple terrain stats, pooled | 128 | 74.0 | 66.5 | 96.1 | 0.22 | 0.56 | 0.0017 |
+| analysis vector on plain LRM | 128 | 92.1 | 86.6 | 95.1 | 0.44 | 1.33 | 0.0018 |
+| same, pooled | 128 | 88.9 | 71.6 | 96.6 | 0.33 | 1.00 | 0.0030 |
+| **full residuals pipeline (640-d)** | 128 | 92.5 | 86.6 | 98.9 | 1.00 | 1.67 | 0.0048 |
+| **full residuals pipeline, pooled** | 128 | 89.5 | 69.5 | 99.5 | 1.11 | 1.89 | 0.0131 |
 
-The best of nine random cells already sits at the 85th percentile and one
-random block in ten reaches the 98th, so a positive at 99.6 is a weak
-enrichment, not a retrieval. No ground-truth site ever appears in another
-site's top 100 cells; about one in two appears in the top 1,000 (0.1% of the
-county). Pooling 3x3 neighbourhoods sharpens wall-to-wall similarity (98.3 vs a
-random median of 70) but does not produce top-k hits either. Conical mounds
-and the pit field are not retrieved by anything. Per-query tables are in
-`validation/results/eval_index_p64*.json`.
+Wall-to-wall pairs scoring at or above the 99.5th percentile (16 ordered pairs
+among the five wall sites): full pipeline 128 px pooled **10/16**, unpooled
+7/16; production index 64 px 7-9/16; plain-LRM analysis vector 2-4/16; simple
+statistics 1-3/16. Per-query tables are in `validation/results/`.
 
-Current determination: **the 64 px residual-texture embedding, as indexed,
-does not retrieve earthworks at a usable precision. It shows a weak wall-to-wall
-enrichment.** Whether the decomposition adds anything over plain terrain
-statistics, and whether a larger patch helps, is what the baseline runs decide
-(section 3, items 3-4; running on EC2 2026-10-13/14).
+### Determination (2026-10-14)
+
+1. **There is a real signal, and it is specific to earthwork walls.** At 128 px
+   (320 ft) the full pipeline puts one of eight other sites in the top 0.1% of
+   the county per query, against roughly 0.9% expected for a random 3x3 block,
+   about a 14x enrichment. Walls retrieve walls across sites 15 miles apart
+   (the Wright remnant retrieves Dixon Mound at 100.0 and the Great Circle at
+   99.5; downtown Newark on the same terrace scores 60-70), so it is not just
+   "Newark terrace texture". Conical mounds are retrieved only partly, the
+   effigy and the pit field not at all.
+2. **The decomposition x upsampling product is the contribution.** At the same
+   scale and with the same 20 statistics, a plain local relief model gets 0.44
+   top-0.1% hits and 3/16 wall pairs; the full pipeline gets 1.00-1.11 and
+   7-10/16. Simple slope/curvature statistics are indistinguishable from random.
+3. **Scale is the biggest lever and the shipped index is at the wrong one.**
+   Going from 64 px to 128 px roughly doubles every retrieval measure; 3x3
+   pooling adds a little more. The 64 px county index is the weakest
+   configuration of the pipeline tested.
+4. **It is not yet a usable detector.** Mean average precision is 0.005-0.013;
+   most sites are not in each other's top 0.1%. It is a candidate ranker that
+   enriches the top of the list by an order of magnitude for wall-type
+   features, with nine positives and uniform (not landform-stratified) controls.
+
+### Next steps, in order of value per hour
+
+- Assemble a 128 px county index from the vectors already computed
+  (`s3://3body-compute-290318/terravector/baselines/full_p128/`, 200 tiles x
+  up to 1,089 patches) and make it the served index; try 3x3 pooling at serve
+  time. No re-embedding needed.
+- Multi-scale: 256 px and a 128 px / 64 px concatenation; 32 px for the wall
+  cross-section.
+- More positives (OAI access, Salisbury 1862 georeferencing) and controls
+  stratified by landform, then report per class with confidence intervals.
+- Ross County transfer against High Bank Works and Hopeton (open 3DEP lidar).
 
 ## 3. What a determination needs
 
