@@ -1,0 +1,16 @@
+[
+ {"name":"Great Circle wall E","x":1988395,"y":743402,"role":"query"},
+ {"name":"Great Circle wall W","x":1987195,"y":743402,"role":"query"},
+ {"name":"Octagon neck","x":1983446,"y":747956,"role":"query"},
+ {"name":"Observatory Mound","x":1982444,"y":747086,"role":"query"},
+ {"name":"Alligator Mound","x":1968220,"y":753917,"role":"query"},
+ {"name":"Eagle Mound (GC center)","x":1987795,"y":743402,"role":"target"},
+ {"name":"Wright wall","x":1989975,"y":746103,"role":"target"},
+ {"name":"Dixon Mound","x":1961680,"y":820090,"role":"target"},
+ {"name":"Flint Ridge pits","x":2035748,"y":725009,"role":"target"},
+ {"name":"ctl downtown Newark","x":1995500,"y":749500,"role":"control"},
+ {"name":"ctl farmland N","x":1956000,"y":810000,"role":"control"},
+ {"name":"ctl Buckeye Lake shore","x":1976000,"y":703500,"role":"control"},
+ {"name":"ctl Granville hill","x":1962000,"y":760000,"role":"control"},
+ {"name":"ctl Flint Ridge no-pit","x":2038500,"y":723500,"role":"control"}
+]

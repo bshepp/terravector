@@ -8,11 +8,13 @@ terravector converts Digital Elevation Models (DEMs) into searchable vector embe
 
 This is an exploratory WIP project. Expect rough edges and evolving APIs.
 
+**Whether the method is useful is not yet established.** The ground-truth site list, the first corrected retrieval probe, the test protocol, and the related-work survey are in `docs/VALIDATION_PLAN.md`; the site CSVs are in `data/ground_truth/` and the probe script in `validation/`. Run that protocol before claiming retrieval results.
+
 Sibling project: **RESIDUALS** at `F:\science-projects\RESIDUALS` produces the county-tile DEM corpus that `build_county_index.py` consumes, and is also a **runtime dependency**: the `residuals` package supplies every decomposition and upsampling method. `src/decomposition/` and `src/upsampling/` are thin facades that re-export from it. Locally it is installed editable (`pip install -e F:\science-projects\RESIDUALS`); `requirements.txt` pins a release tag for everyone else.
 
 ## Common commands
 
-Install with `pip install -r requirements.txt` (plus `pip install -e ../RESIDUALS` for a local RESIDUALS checkout). There is a small pytest suite under `tests/` covering the analysis vector and signed-log1p scaling, tiling filters, HNSW index build/query/save/load, preset validation, and single-patch embeddings; run it with `python -m pytest` (a few seconds, light CPU). No linter is configured. County-scale behavior is still verified run-and-inspect.
+Install with `pip install -r requirements.txt` (plus `pip install -e ../RESIDUALS` for a local RESIDUALS checkout). There is a small pytest suite under `tests/` covering the analysis vector and signed-log1p scaling, tiling filters, HNSW index build/query/save/load, preset validation, single-patch embeddings, and the coordinate bridge / similarity-raster placement (south-up tile convention); run it with `python -m pytest` (a few seconds, light CPU). No linter is configured. County-scale behavior is still verified run-and-inspect.
 
 Main entry points are top-level scripts, each with `--help`:
 
@@ -40,7 +42,7 @@ uvicorn api:app --reload --host 127.0.0.1 --port 8000
 TERRAVECTOR_INDEX=path/to/licking_county.idx uvicorn api:app
 
 # County-wide similarity GeoTIFF without the API
-python -m src.similarity_raster data/licking_county/licking_county.idx --patch 588007 -o out.tif
+python -m src.similarity_raster data/licking_county/licking_county.idx --patch 311270 -o out.tif
 ```
 
 `build_county_index.py` writes per-tile `.npz` checkpoints under `data/licking_county/checkpoints/` and is safe to interrupt. `--resume` skips already-checkpointed tiles. The final index is a single unified HNSW across all 858,642 patches (200 tiles × up to 66×66 patches each at patch_size=64, after dropping nodata and constant-fill patches). The embedding pass is single-threaded at ~15 min/tile; `county_worker.py` fills idle cores and writes the same checkpoints.
@@ -77,7 +79,7 @@ Patch metadata always includes `y_start`, `x_start`, `row`, `col`, `center`, `sh
 
 `src/coords.py::CoordBridge` maps **WGS84 ↔ EPSG:3735 (Ohio State Plane South, feet) ↔ (tile_id, pixel) ↔ global patch_id**. It's only meaningful when the index was built from the Licking County corpus — it needs `corpus.json` alongside the `.idx`/`.meta`. API endpoints gracefully 501 when the bridge is unavailable.
 
-When working with spatial queries: State Plane is authoritative internally; WGS84 is a convenience at API/UI boundaries. The bridge builds a `(tile_id, y_start, x_start) → global_id` lookup at construction so point queries are O(1). Point lookups are bounded by the **tile grid extent** (`grid_x_max`, `grid_y_min`), not the nominal `county_bounds`: the grid is whole tiles anchored at the NW corner and overshoots the county's SE edge, and the patches in that strip are real data.
+When working with spatial queries: State Plane is authoritative internally; WGS84 is a convenience at API/UI boundaries. The bridge builds a `(tile_id, y_start, x_start) → global_id` lookup at construction so point queries are O(1). **Tile rows count from the south and DEM arrays are south-up.** `RESIDUALS/tile_county.py` numbers tile rows from `county_y_min` (R00 is the southernmost row) and builds each tile DEM with `np.arange(y_min, y_max)` on axis 0, so array row 0 is the tile's southern edge and patch `y_start` grows northward. `CoordBridge` and `SimilarityRaster` encode this (fixed 2026-10-13; before that every point lookup and the raster geotransform were vertically mirrored, so patch 588007 was *not* the Great Circle). Point lookups are bounded by the **tile grid extent** (`grid_x_max`, `grid_y_max`), not the nominal `county_bounds`: the grid is whole tiles anchored at the SW corner and overshoots the county's N and E edges, and the patches in that strip are real data. `tests/test_coords.py` pins the convention, including a real-corpus check that the Great Circle centre resolves to tile R04_C09.
 
 ### Similarity raster (county builds only)
 

@@ -1,0 +1,7 @@
+site_id,name,county,feature_type,lon,lat,position_quality,surviving_relief,source,notes
+HOPETON,Hopeton Earthworks,Ross,"square + circle enclosure, parallel walls",-82.9782242,39.3836545,approximate,"walls ploughed low, still visible in lidar",OSM node (Wikipedia table gives wrong coords for this site),Held-out site; needs Ross County lidar (USGS 3DEP Ohio Phase 3 2020-2023 QL1 covers Ross).
+MOUND_CITY,Mound City Group,Ross,24 mounds inside low embankment,-83.0039889,39.3764889,approximate,reconstructed mounds,Wikipedia Hopewell Ceremonial Earthworks,Mounds were reconstructed in the 20th century; relief is partly modern.
+HIGH_BANK,High Bank Works,Ross,octagon + circle,-82.9184889,39.2985611,approximate,heavily degraded by farming,Wikipedia Hopewell Ceremonial Earthworks,Geometric twin of the Newark Octagon; a strong transfer test.
+HOPEWELL_MG,Hopewell Mound Group,Ross,40+ mounds within 2.5 mi of walls,-83.0933722,39.3609833,approximate,mixed,Wikipedia Hopewell Ceremonial Earthworks,
+SEIP,Seip Earthworks,Ross,"25 ft mound, two circles and a square",-83.2198250,39.2374694,approximate,large central mound reconstructed,Wikipedia Hopewell Ceremonial Earthworks,
+FORT_ANCIENT,Fort Ancient,Warren,hilltop enclosure 3.5 mi of walls 4-23 ft,-84.0925500,39.4033611,approximate,high,Wikipedia Hopewell Ceremonial Earthworks,Different landform setting (hilltop); Warren County lidar is in Ohio Phase 3.

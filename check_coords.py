@@ -63,7 +63,7 @@ def main() -> int:
     )
     print(
         f"Tile grid:    X=[{bridge.x_min:,.0f}, {bridge.grid_x_max:,.0f}], "
-        f"Y=[{bridge.grid_y_min:,.0f}, {bridge.y_max:,.0f}] "
+        f"Y=[{bridge.y_min:,.0f}, {bridge.grid_y_max:,.0f}] "
         f"({bridge.grid_rows} rows x {bridge.grid_cols} cols of {bridge.tile_size_ft:,.0f} ft)"
     )
 
@@ -71,7 +71,7 @@ def main() -> int:
     if hit is None:
         in_grid = (
             bridge.x_min <= x < bridge.grid_x_max
-            and bridge.grid_y_min < y <= bridge.y_max
+            and bridge.y_min <= y < bridge.grid_y_max
         )
         if in_grid:
             print("\nResult:       INSIDE the tile grid, but the tile there has no data")
@@ -82,8 +82,8 @@ def main() -> int:
                 f"(grid width {bridge.grid_x_max - bridge.x_min:,.0f} ft)"
             )
             print(
-                f"  Y offset from grid min: {y - bridge.grid_y_min:+,.0f} ft "
-                f"(grid height {bridge.y_max - bridge.grid_y_min:,.0f} ft)"
+                f"  Y offset from grid min: {y - bridge.y_min:+,.0f} ft "
+                f"(grid height {bridge.grid_y_max - bridge.y_min:,.0f} ft)"
             )
         return 1
 

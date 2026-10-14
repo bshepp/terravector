@@ -262,16 +262,16 @@ the query cell at 1.0. Any GIS can style it as a heat map; no plugin needed.
 
 ```bash
 # Query by patch id, WGS84, or State Plane; value=similarity (default) or distance
-curl -o great_circle.tif "http://127.0.0.1:8000/similarity/raster?lon=-82.4590&lat=40.0279"
-curl -o patch_588007.tif "http://127.0.0.1:8000/similarity/raster?patch_id=588007&value=distance"
+curl -o great_circle.tif "http://127.0.0.1:8000/similarity/raster?lon=-82.4311&lat=40.0410"
+curl -o patch_311270.tif "http://127.0.0.1:8000/similarity/raster?patch_id=311270&value=distance"
 
 # GDAL/rasterio/QGIS can read it straight from the URL with the streaming
 # handler (the response is generated on the fly, so plain /vsicurl/ range
 # requests are not supported):
-gdalinfo "/vsicurl_streaming/http://127.0.0.1:8000/similarity/raster?patch_id=588007"
+gdalinfo "/vsicurl_streaming/http://127.0.0.1:8000/similarity/raster?patch_id=311270"
 
 # Offline, without the API:
-python -m src.similarity_raster data/licking_county/licking_county.idx --patch 588007 -o out.tif
+python -m src.similarity_raster data/licking_county/licking_county.idx --patch 311270 -o out.tif
 ```
 
 `GET /info` reports the raster grid (`raster_grid`: rows, cols, cell size,
@@ -281,7 +281,7 @@ Quick sanity check that a point of interest is inside your corpus
 (no full index load required):
 
 ```bash
-python check_coords.py --lat 40.0279 --lon -82.4590 \
+python check_coords.py --lat 40.0410 --lon -82.4311 \
     --corpus data/licking_county/licking_county.corpus.json
 ```
 
@@ -349,9 +349,12 @@ terravector/
 ├── county_worker.py           # Parallel helper for the county build
 ├── compare_separability.py    # Sweep residuals signature variants
 ├── tests/                     # pytest suite (seconds; no county data needed)
+├── docs/VALIDATION_PLAN.md    # Ground truth, first retrieval probe, related work, test datasets
+├── data/ground_truth/         # Licking County earthwork site list (CSV) + Ross/Warren held-out set
 ├── pytest.ini
 ├── sweep_turing.py            # Turing iteration / Pearson (F,k) grid sweeps
 ├── check_coords.py            # Quick "is this point in the corpus?" check
+├── validation/                # Retrieval probe script, site list and results
 ├── src/
 │   ├── config.py              # YAML config parsing
 │   ├── coords.py              # WGS84 ↔ State Plane ↔ patch ID bridge
@@ -396,8 +399,10 @@ terravector/
 A small pytest suite lives in `tests/`. It covers the analysis vector and its
 signed-log1p scaling, the tiling filters (nodata and constant-fill patches),
 HNSW index build/query/save/load including the thread cap, preset validation,
-and single-patch embeddings for the shipped presets. It runs in a few seconds
-and does not touch the county corpus.
+single-patch embeddings for the shipped presets, and the coordinate bridge and
+similarity-raster cell placement (county tiles are south-up; see
+`src/coords.py`). It runs in a few seconds; one bridge test uses the county
+`corpus.json` if present and is skipped otherwise.
 
 ```bash
 python -m pytest
@@ -428,10 +433,11 @@ The decomposition and upsampling methods are imported from [RESIDUALS](https://g
 
 terravector is part of a layered architecture — see the full roadmap in [RESIDUALS](https://github.com/bshepp/RESIDUALS). The next steps for terravector specifically:
 
-1. **Index the Licking County corpus** — done. RESIDUALS produced 200 cached DEM tiles (February 2026) and the full HNSW index was built on 2026-10-11: 858,642 patches at 64×64, 640-d, zero embedding failures. Next is exercising it through the REST API and UIs at county scale.
-2. **QGIS plugin** — package the index + query pipeline as a GIS plugin ("Right-click → Find Similar Terrain").
-3. **Modernize the index backend** — evaluate FAISS or Qdrant as replacements for nmslib.
-4. **Recommendation API** — given a terrain patch, recommend the best decomposition method (see `docs/RESIDUALS_SERVICE_CONCEPT.md`).
+1. **Index the Licking County corpus** — done. RESIDUALS produced 200 cached DEM tiles (February 2026); the full HNSW index was first built on 2026-10-11 and rebuilt on 2026-10-13 after the signed-log1p change: 858,642 patches at 64×64, 640-d, zero embedding failures.
+2. **Validate against ground truth** — in progress. `docs/VALIDATION_PLAN.md` has the site list, the first corrected retrieval probe (a Great Circle wall query ranks the Octagon, Observatory Mound and Alligator Mound in the top 0.4% of the county; controls do not), the protocol with baselines, and the public datasets to test on next.
+3. **QGIS plugin** — package the index + query pipeline as a GIS plugin ("Right-click → Find Similar Terrain").
+4. **Modernize the index backend** — evaluate FAISS or Qdrant as replacements for nmslib.
+5. **Recommendation API** — given a terrain patch, recommend the best decomposition method (see `docs/RESIDUALS_SERVICE_CONCEPT.md`).
 
 ### Architecture Principle
 
@@ -445,7 +451,7 @@ Apache 2.0
 
 ```bibtex
 @software{terravector2025,
-  author = {Shepp, B.},
+  author = {Sheppard, Brian},
   title = {terravector: Terrain Patch Similarity Search},
   year = {2025},
   url = {https://github.com/bshepp/terravector}

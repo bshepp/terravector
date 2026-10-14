@@ -57,10 +57,12 @@ class SimilarityRaster:
         self.height = bridge.grid_rows * self.patches_per_tile
         self.width = bridge.grid_cols * self.patches_per_tile
         self.crs = bridge.crs
-        # (a, b, c, d, e, f) affine as rasterio/GDAL use it: x = c + a*col, y = f + e*row
+        # (a, b, c, d, e, f) affine as rasterio/GDAL use it: x = c + a*col, y = f + e*row.
+        # Raster row 0 is the NORTH edge of the tile grid (grid_y_max), whereas
+        # tile rows and patch y_start count from the SOUTH; the lookup below flips.
         self.transform = (
             self.cell_size_ft, 0.0, bridge.x_min,
-            0.0, -self.cell_size_ft, bridge.y_max,
+            0.0, -self.cell_size_ft, bridge.grid_y_max,
         )
 
         # ---- Patch -> cell lookup ------------------------------------------
@@ -77,7 +79,11 @@ class SimilarityRaster:
             if tid is None or tid not in tile_rc:
                 continue
             tr, tc = tile_rc[tid]
-            self.cell_rows[pid] = tr * self.patches_per_tile + meta["y_start"] // self.patch_size
+            row_in_tile = meta["y_start"] // self.patch_size  # counted from the south
+            self.cell_rows[pid] = (
+                (bridge.grid_rows - 1 - tr) * self.patches_per_tile
+                + (self.patches_per_tile - 1 - row_in_tile)
+            )
             self.cell_cols[pid] = tc * self.patches_per_tile + meta["x_start"] // self.patch_size
         self._placed = self.cell_rows >= 0
         if not self._placed.any():
