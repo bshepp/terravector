@@ -98,21 +98,67 @@ def load_index_vectors(grid: Grid, meta_path: Path = META):
     return X, mean, std
 
 
-def load_npz_vectors(grid: Grid, d: Path):
+def load_npz_vectors(grid: Grid, d: Path, extra_dims: int = 0):
+    """Place every tile's patch vectors on the cell grid.
+
+    Memory-lean: the grid array is allocated once (with ``extra_dims`` spare
+    columns for a parent-scale concat) and the z-score statistics are
+    accumulated per tile instead of over a copy of the placed rows.
+    """
     X = None
+    s = ss = None
+    n = 0
     for f in sorted(d.glob("R*_C*.npz")):
         z = np.load(f)
         tid = f.stem
         feats = z["feats"]
+        ys, xs = z["y_start"].astype(np.int64), z["x_start"].astype(np.int64)
         if X is None:
-            X = np.full((grid.n, feats.shape[1]), np.nan, dtype=np.float32)
-        for ys, xs, v in zip(z["y_start"], z["x_start"], feats):
-            X[grid.cell_of_tile_local(tid, int(ys), int(xs))] = v
-    fin = np.isfinite(X).all(1)
-    mean = np.nanmean(X[fin], axis=0)
-    std = np.nanstd(X[fin], axis=0)
+            dim = feats.shape[1]
+            X = np.full((grid.n, dim + extra_dims), np.nan, dtype=np.float32)
+            s = np.zeros(dim); ss = np.zeros(dim)
+        tr, tc = int(tid[1:3]), int(tid[5:7])
+        r = (grid.b.grid_rows - 1 - tr) * grid.ppt + (grid.ppt - 1 - ys // grid.ps)
+        c = tc * grid.ppt + xs // grid.ps
+        ok = np.isfinite(feats).all(1) & (ys // grid.ps < grid.ppt) & (xs // grid.ps < grid.ppt)
+        X[(r * grid.cols + c)[ok], :dim] = feats[ok]
+        fv = feats[ok].astype(np.float64)
+        s += fv.sum(0); ss += (fv * fv).sum(0); n += len(fv)
+    mean = (s / n).astype(np.float32)
+    std = np.sqrt(np.maximum(ss / n - (s / n) ** 2, 0)).astype(np.float32)
     std[std == 0] = 1
     return X, mean, std
+
+
+def zscore_inplace(X: np.ndarray, mean: np.ndarray, std: np.ndarray, dim: int, chunk: int = 200_000) -> np.ndarray:
+    """Z-score the first ``dim`` columns in place; unplaced rows become zero. Returns the placed mask."""
+    placed = np.empty(len(X), dtype=bool)
+    for i in range(0, len(X), chunk):
+        blk = X[i:i + chunk, :dim]
+        p = np.isfinite(blk).all(1)
+        placed[i:i + chunk] = p
+        blk -= mean; blk /= std
+        blk[~p] = 0
+    return placed
+
+
+def pool3(Z: np.ndarray, placed: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """Mean over each cell's placed 3x3 neighbours (zero-padded at the grid edges, no wrap).
+
+    Unplaced rows of ``Z`` are zero, so no mask multiply is needed; peak memory
+    is the input plus one output array.
+    """
+    Zg = Z.reshape(rows, cols, -1)
+    Pg = placed.reshape(rows, cols).astype(np.float32)
+    acc = np.zeros_like(Zg); cnt = np.zeros_like(Pg)
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            tr = slice(max(0, -dr), rows - max(0, dr)); tc = slice(max(0, -dc), cols - max(0, dc))
+            sr = slice(max(0, dr), rows - max(0, -dr)); sc = slice(max(0, dc), cols - max(0, -dc))
+            acc[tr, tc] += Zg[sr, sc]
+            cnt[tr, tc] += Pg[sr, sc]
+    acc /= np.maximum(cnt, 1)[..., None]
+    return acc.reshape(len(Z), -1)
 
 
 def main():
@@ -136,18 +182,23 @@ def main():
     bridge = CoordBridge(corpus, {}, patch_size=a.patch_size)
     grid = Grid(bridge, a.patch_size)
     t0 = time.time()
+    pps = a.parent_patch_size
+    pgrid = Grid(bridge, pps) if a.concat_parent else None
+    if a.concat_parent:
+        PX, pmean, pstd = load_npz_vectors(pgrid, Path(a.concat_parent))
+        pplaced = zscore_inplace(PX, pmean, pstd, PX.shape[1])
+        PZ = PX
+    extra = PZ.shape[1] if a.concat_parent else 0
     if a.source == "index":
         X, mean, std = load_index_vectors(grid, Path(a.meta))
+        if extra:
+            X = np.concatenate([X, np.full((grid.n, extra), np.nan, dtype=np.float32)], axis=1)
     else:
-        X, mean, std = load_npz_vectors(grid, Path(a.source))
-    placed = np.isfinite(X).all(1)
-    Z = np.where(placed[:, None], (X - mean) / std, 0).astype(np.float32)
+        X, mean, std = load_npz_vectors(grid, Path(a.source), extra_dims=extra)
+    dim = X.shape[1] - extra
+    placed = zscore_inplace(X, mean, std, dim)
+    Z = X
     if a.concat_parent:
-        pps = a.parent_patch_size
-        pgrid = Grid(bridge, pps)
-        PX, pmean, pstd = load_npz_vectors(pgrid, Path(a.concat_parent))
-        pplaced = np.isfinite(PX).all(1)
-        PZ = np.where(pplaced[:, None], (PX - pmean) / pstd, 0).astype(np.float32)
         # child cell -> tile-local (y_start, x_start) -> parent cell, via the tile grid geometry
         rr, cc = np.divmod(np.arange(grid.n), grid.cols)
         tr = grid.b.grid_rows - 1 - rr // grid.ppt          # tile row (from south)
@@ -158,19 +209,17 @@ def main():
         pcol = tc * pgrid.ppt + x_start // pps
         ok = (y_start // pps < pgrid.ppt) & (x_start // pps < pgrid.ppt)
         pcell = np.where(ok, prow * pgrid.cols + pcol, 0)
-        parent_vec = np.where((ok & pplaced[pcell])[:, None], PZ[pcell], 0).astype(np.float32)
-        Z = np.concatenate([Z, parent_vec], axis=1)
-        placed = placed & ok & pplaced[pcell]
+        both = placed & ok & pplaced[pcell]
+        for i in range(0, grid.n, 200_000):
+            sl = slice(i, i + 200_000)
+            Z[sl, dim:] = np.where(both[sl, None], PZ[pcell[sl]], 0)
+        Z[~both] = 0
+        placed = both
+        del PZ, PX
         print(f"concatenated parent vectors ({pps} px): {Z.shape[1]} dims, {int(placed.sum())} cells with both", flush=True)
     if a.pool3:
-        Zg = Z.reshape(grid.rows, grid.cols, -1)
-        Pg = placed.reshape(grid.rows, grid.cols).astype(np.float32)
-        acc = np.zeros_like(Zg); cnt = np.zeros_like(Pg)
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                acc += np.roll(np.roll(Zg, dr, 0), dc, 1) * np.roll(np.roll(Pg, dr, 0), dc, 1)[..., None]
-                cnt += np.roll(np.roll(Pg, dr, 0), dc, 1)
-        Z = (acc / np.maximum(cnt, 1)[..., None]).reshape(grid.n, -1).astype(np.float32)
+        Z = pool3(Z, placed, grid.rows, grid.cols)
+        del X
     norms = np.linalg.norm(Z, axis=1)
     norms[norms == 0] = np.inf
     print(f"vectors: {int(placed.sum())} placed cells x {Z.shape[1]} dims, loaded in {time.time()-t0:.0f}s", flush=True)
