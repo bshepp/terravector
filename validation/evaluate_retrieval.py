@@ -124,6 +124,8 @@ def main():
     ap.add_argument("--sites", default=str(ROOT / "validation" / "gt_sites.json"))
     ap.add_argument("--controls", default=str(ROOT / "validation" / "probe_sites.json"))
     ap.add_argument("--n-random", type=int, default=500)
+    ap.add_argument("--concat-parent", default=None, help="npz dir at a coarser patch size; its containing cell's z-scored vector is appended to each cell")
+    ap.add_argument("--parent-patch-size", type=int, default=None)
     ap.add_argument("--exclude-ft", type=float, default=1500.0)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -140,6 +142,26 @@ def main():
         X, mean, std = load_npz_vectors(grid, Path(a.source))
     placed = np.isfinite(X).all(1)
     Z = np.where(placed[:, None], (X - mean) / std, 0).astype(np.float32)
+    if a.concat_parent:
+        pps = a.parent_patch_size
+        pgrid = Grid(bridge, pps)
+        PX, pmean, pstd = load_npz_vectors(pgrid, Path(a.concat_parent))
+        pplaced = np.isfinite(PX).all(1)
+        PZ = np.where(pplaced[:, None], (PX - pmean) / pstd, 0).astype(np.float32)
+        # child cell -> tile-local (y_start, x_start) -> parent cell, via the tile grid geometry
+        rr, cc = np.divmod(np.arange(grid.n), grid.cols)
+        tr = grid.b.grid_rows - 1 - rr // grid.ppt          # tile row (from south)
+        tc = cc // grid.ppt
+        y_start = (grid.ppt - 1 - rr % grid.ppt) * grid.ps  # tile-local, from south
+        x_start = (cc % grid.ppt) * grid.ps
+        prow = (grid.b.grid_rows - 1 - tr) * pgrid.ppt + (pgrid.ppt - 1 - (y_start // pps))
+        pcol = tc * pgrid.ppt + x_start // pps
+        ok = (y_start // pps < pgrid.ppt) & (x_start // pps < pgrid.ppt)
+        pcell = np.where(ok, prow * pgrid.cols + pcol, 0)
+        parent_vec = np.where((ok & pplaced[pcell])[:, None], PZ[pcell], 0).astype(np.float32)
+        Z = np.concatenate([Z, parent_vec], axis=1)
+        placed = placed & ok & pplaced[pcell]
+        print(f"concatenated parent vectors ({pps} px): {Z.shape[1]} dims, {int(placed.sum())} cells with both", flush=True)
     if a.pool3:
         Zg = Z.reshape(grid.rows, grid.cols, -1)
         Pg = placed.reshape(grid.rows, grid.cols).astype(np.float32)
@@ -208,6 +230,8 @@ def main():
             "cls": q["cls"], "others": {s["name"]: p for s, p in zip(sites, row) if p is not None},
             "AP": ap_, "hits": hits, "n_others": len(others),
             "controls_pct": ctl_p, "random_pct_median": float(np.median(rnd_p)), "random_pct_p90": float(np.percentile(rnd_p, 90)),
+            "random_frac_above": {str(t): float((rnd_p >= t).mean()) for t in (99.9, 99.5, 98.0)},
+            "others_frac_above": {str(t): float(np.mean([p >= t for p in pcts])) if pcts else 0.0 for t in (99.9, 99.5, 98.0)},
         }
         print(f"{q['name'][:24]:24s} {q['cls']:6s} " + " ".join(f"{(f'{p:.1f}' if p is not None else '-'):>10s}" for p in row)
               + f" | {ap_:5.3f} " + " ".join(f"{hits[k]:>7d}" for k in KS)
@@ -218,6 +242,11 @@ def main():
         "mean_hits": {str(k): float(np.mean([v["hits"][k] for v in qs.values()])) for k in KS},
         "mean_other_pct": float(np.mean([p for v in qs.values() for p in v["others"].values()])),
         "mean_random_pct_median": float(np.mean([v["random_pct_median"] for v in qs.values()])),
+        "enrichment": {t: (float(np.mean([v["others_frac_above"][t] for v in qs.values()]))
+                           / max(float(np.mean([v["random_frac_above"][t] for v in qs.values()])), 1e-6))
+                       for t in ("99.9", "99.5", "98.0")},
+        "others_frac_above": {t: float(np.mean([v["others_frac_above"][t] for v in qs.values()])) for t in ("99.9", "99.5", "98.0")},
+        "random_frac_above": {t: float(np.mean([v["random_frac_above"][t] for v in qs.values()])) for t in ("99.9", "99.5", "98.0")},
         "wall_to_wall_pct": float(np.mean([p for q in sites if q["cls"] == "wall" for s, p in
                                            ((s, qs[q["name"]]["others"].get(s["name"])) for s in sites if s["cls"] == "wall")
                                            if p is not None])) if any(q["cls"] == "wall" for q in sites) else None,
