@@ -100,8 +100,8 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
 
 1. **There is a real signal, and it is specific to earthwork walls.** At 128 px
    (320 ft) the full pipeline puts one of eight other sites in the top 0.1% of
-   the county per query, against roughly 0.9% expected for a random 3x3 block,
-   about a 14x enrichment. Walls retrieve walls across sites 15 miles apart
+   the county per query, against roughly 0.7% expected for a random 3x3 block,
+   a 21x enrichment (31x with 3x3 pooling; see the multi-scale table below). Walls retrieve walls across sites 15 miles apart
    (the Wright remnant retrieves Dixon Mound at 100.0 and the Great Circle at
    99.5; downtown Newark on the same terrace scores 60-70), so it is not just
    "Newark terrace texture". Conical mounds are retrieved only partly, the
@@ -119,6 +119,67 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
    enriches the top of the list by an order of magnitude for wall-type
    features, with nine positives and uniform (not landform-stratified) controls.
 
+### Multi-scale (2026-10-14)
+
+Full-pipeline vectors at 32 px and 256 px were computed on a c7a.16xlarge
+(`validation/ec2_run.sh` pattern, 2 h 10 min, about $7; the 32 px pass is
+3.5M patches and took 1 h 46 min of that) and evaluated with the same
+protocol. The 32 px grid has 3.4M cells, so it was scored on an r7a.4xlarge
+(4 minutes) after `validation/evaluate_retrieval.py` was made memory-lean.
+Mean AP is **not comparable across scales** (it depends on absolute ranks and
+the 32 px grid has 16x more cells than 128 px); the fraction-of-county
+measures and the enrichment over random 3x3 blocks are the comparable ones.
+Enrichment = (fraction of other sites whose best block cell is in the top
+0.1% / 0.5% of the county) / (same fraction for 500 random blocks).
+
+| full-pipeline vectors | cells | other sites: mean pct | random block median | wall-to-wall pct | top 0.1% enrichment | top 0.5% enrichment | wall pairs >= 99.5 | mean AP |
+|---|---|---|---|---|---|---|---|---|
+| 32 px (80 ft) | 3.4M | 90.5 | 76.1 | 90.1 | 18.4x | 7.1x | 6/16 | 0.0001 |
+| 32 px, pooled | 3.4M | 82.9 | 62.9 | 85.8 | 20.0x | 5.8x | 2/16 | 0.0001 |
+| 32 px + 128 px parent (1280-d) | 3.4M | 91.1 | 74.1 | 92.6 | 21.6x | 6.8x | 7/16 | 0.0001 |
+| 32 px + 128 px parent, pooled | 3.4M | 83.7 | 61.8 | 93.7 | 18.5x | 10.6x | 6/16 | 0.0001 |
+| 64 px (production index) | 859k | 90.0 | 85.3 | 94.2 | 5.9x | 4.0x | 7/16 | 0.0004 |
+| 64 px, pooled | 859k | 78.2 | 70.0 | 98.3 | 7.0x | 7.3x | 9/16 | 0.0003 |
+| **128 px (320 ft)** | 215k | 92.5 | 86.6 | 98.9 | 21.2x | 7.1x | 7/16 | 0.0048 |
+| **128 px, pooled (served)** | 215k | 89.5 | 69.5 | **99.5** | **31.1x** | 12.4x | **10/16** | 0.0131 |
+| 128 px + 256 px parent (1280-d) | 202k | 91.8 | 82.1 | 98.9 | 18.9x | 9.8x | 10/16 | 0.0107 |
+| 128 px + 256 px parent, pooled | 202k | 90.8 | 69.1 | 99.0 | 19.8x | **13.2x** | 10/16 | **0.0183** |
+| 256 px (640 ft) | 51k | 87.8 | 86.5 | 93.8 | 7.5x | 4.7x | 4/16 | 0.0047 |
+| 256 px, pooled | 51k | 80.4 | 72.5 | 86.1 | 2.3x | 4.4x | 3/16 | 0.0022 |
+| plain-LRM analysis vector, 32 px | 3.4M | 92.1 | 81.8 | 91.2 | 14.3x | 8.5x | 5/16 | 0.0001 |
+| plain-LRM analysis vector, 256 px | 51k | 84.0 | 86.7 | 85.5 | 0.0x | 1.4x | 1/16 | 0.0017 |
+
+Reading:
+
+- **128 px is the carrier scale.** It has the best wall-to-wall percentile,
+  the most wall pairs above 99.5 and the highest top-0.1% enrichment, and it
+  is the only scale where 3x3 pooling helps rather than hurts. At 256 px a
+  pooled block is 1,920 ft across and averages the earthwork away; at 32 px a
+  single cell is a slice of wall and pooling to 240 ft blocks loses the
+  cross-section without reaching the 320 ft context that 128 px has.
+- **32 px alone roughly matches unpooled 128 px on top-0.1% enrichment
+  (18-22x)** but is far weaker on wall-to-wall percentile (90 vs 99) and wall
+  pairs (6 vs 7-10 of 16), at 16x the index size. Appending the 128 px parent
+  vector to each 32 px cell does not recover the 128 px result.
+- **Appending the 256 px parent to 128 px gives the best mean AP (0.018
+  pooled) and top-0.5% enrichment (13.2x)** while keeping 10/16 wall pairs,
+  but the top-0.1% enrichment falls from 31x to 20x and the AP gain comes from
+  two queries (Eagle Mound 0.034 -> 0.071, Great Circle east wall 0.001 ->
+  0.005). With nine queries that is not a reliable improvement, and it doubles
+  the vector width, so no multi-scale index is being built from it.
+- **The 64 px dip is unexplained.** The 32 px and 128 px rows come from
+  `validation/baseline_features.py`; the 64 px rows come from the production
+  `build_county_index.py` run, so the dip could be a scale effect or a
+  difference between the two code paths. A 64 px `baseline_features.py` pass
+  (about 25 minutes on the same instance) would settle it; it has not been run.
+- **The plain-LRM vector tracks the full pipeline's scale curve** (14x at
+  32 px, 7-9x at 128 px, ~0 at 256 px) at a lower level, so the scale
+  behaviour is a property of the statistics, and the decomposition's gain
+  (2-3x at 128 px) is on top of it.
+
+Decision: keep serving `licking_county_p128_pool3.idx`. Multi-scale is parked
+until more positives exist to tell a two-query AP gain from noise.
+
 ### Next steps, in order of value per hour
 
 - Done 2026-10-14: `data/licking_county/licking_county_p128.idx` assembled from the
@@ -128,8 +189,9 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
   `licking_county_p128_pool3.idx` (`src/pooling.py`, z-score params from the
   unpooled vectors) reproduces the pooled row above as served
   (`validation/results/eval_index_p128_pool3_served.json`, mean AP 0.0133).
-- Multi-scale: 256 px and a 128 px / 64 px concatenation; 32 px for the wall
-  cross-section.
+- Done 2026-10-14: multi-scale (32, 128, 256 px and the 32+128, 128+256
+  concatenations; table above). 128 px pooled stays the served configuration.
+  Open: a 64 px `baseline_features.py` pass to explain the 64 px dip.
 - More positives (OAI access, Salisbury 1862 georeferencing) and controls
   stratified by landform, then report per class with confidence intervals.
 - Ross County transfer against High Bank Works and Hopeton (open 3DEP lidar).
