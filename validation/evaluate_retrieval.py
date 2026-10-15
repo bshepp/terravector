@@ -16,7 +16,13 @@ Protocol, for every ground-truth site used as a query (validation/gt_sites.json)
     whether that block intersects the top-k cells (k = 100, 1000, 10000);
   * average precision over the other sites, ranking each by its best cell;
   * the same percentile for N uniformly random control cells, and for the
-    hand-picked controls in validation/probe_sites.json (role == control).
+    hand-picked controls in validation/probe_sites.json (role == control);
+  * with --landform, the same again for N landform-matched control blocks:
+    cells drawn from the --match-frac of the county nearest to the query in a
+    log/z-scored relief-slope-tilt space built from the 12-d simple terrain
+    statistics (baseline_features.py --mode simple at the same patch size).
+    Enrichment against these controls asks whether the query retrieves
+    earthworks beyond "terrain that looks like a river terrace".
 
 Prints a markdown table and writes a JSON report.
 
@@ -173,6 +179,9 @@ def main():
     ap.add_argument("--concat-parent", default=None, help="npz dir at a coarser patch size; its containing cell's z-scored vector is appended to each cell")
     ap.add_argument("--parent-patch-size", type=int, default=None)
     ap.add_argument("--exclude-ft", type=float, default=1500.0)
+    ap.add_argument("--landform", default=None, help="npz dir of simple terrain stats at --patch-size for landform-matched controls")
+    ap.add_argument("--landform-dims", default="0,2,9,11", help="indices into the 12-d simple stats: default relief std, mean slope, TPI-32 std, plane gradient")
+    ap.add_argument("--match-frac", type=float, default=0.05, help="fraction of the county nearest in landform space to draw matched controls from")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
@@ -236,6 +245,17 @@ def main():
     rand_cells = rng.choice(np.flatnonzero(placed), a.n_random, replace=False)
     rand_blocks = [[c for c in grid.neighbours(int(rc)) if placed[c]] for rc in rand_cells]
 
+    L = None
+    if a.landform:
+        LX, _, _ = load_npz_vectors(grid, Path(a.landform))
+        dims = [int(d) for d in a.landform_dims.split(",")]
+        L = np.log1p(np.abs(LX[:, dims]))
+        lplaced = np.isfinite(L).all(1) & placed
+        L = (L - L[lplaced].mean(0)) / L[lplaced].std(0)
+        L[~lplaced] = 0
+        del LX
+        print(f"landform descriptor: {len(dims)} dims from {a.landform}, {int(lplaced.sum())} cells", flush=True)
+
     # cell centres for the exclusion radius
     rr, cc = np.divmod(np.arange(grid.n), grid.cols)
     cx = bridge.x_min + (cc + 0.5) * grid.cell_ft
@@ -275,16 +295,39 @@ def main():
         hits = {k: int(sum(1 for r in ranks_sorted if r < k)) for k in KS}
         ctl_p = [100.0 * (1 - best_rank(s["block"]) / n_valid) for s in ctrls if best_rank(s["block"]) is not None]
         rnd_p = np.array([100.0 * (1 - best_rank(b) / n_valid) for b in rand_blocks if best_rank(b) is not None])
+        matched = {}
+        if L is not None:
+            qcell = q["cell"] if lplaced[q["cell"]] else q["block"][0]
+            ld = np.linalg.norm(L - L[qcell], axis=1)
+            ld[~(valid & lplaced)] = np.inf
+            n_cand = max(a.n_random, int(a.match_frac * int((valid & lplaced).sum())))
+            cand = np.argpartition(ld, n_cand)[:n_cand]
+            mrng = np.random.default_rng(1)
+            mcells = mrng.choice(cand, min(a.n_random, len(cand)), replace=False)
+            mblocks = [[c for c in grid.neighbours(int(mc)) if placed[c]] for mc in mcells]
+            m_p = np.array([100.0 * (1 - best_rank(b) / n_valid) for b in mblocks if best_rank(b) is not None])
+            # landform percentiles of the query cell (0-100 within the county) for the write-up
+            lq = [float((L[lplaced, j] <= L[qcell, j]).mean() * 100) for j in range(L.shape[1])]
+            matched = {
+                "matched_random_pct_median": float(np.median(m_p)), "matched_random_pct_p90": float(np.percentile(m_p, 90)),
+                "matched_random_frac_above": {str(t): float((m_p >= t).mean()) for t in (99.9, 99.5, 98.0)},
+                "matched_landform_dist_median": float(np.median(ld[mcells])),
+                "uniform_landform_dist_median": float(np.median(ld[rand_cells][np.isfinite(ld[rand_cells])])),
+                "query_landform_pct": lq,
+            }
         report["queries"][q["name"]] = {
             "cls": q["cls"], "others": {s["name"]: p for s, p in zip(sites, row) if p is not None},
             "AP": ap_, "hits": hits, "n_others": len(others),
             "controls_pct": ctl_p, "random_pct_median": float(np.median(rnd_p)), "random_pct_p90": float(np.percentile(rnd_p, 90)),
             "random_frac_above": {str(t): float((rnd_p >= t).mean()) for t in (99.9, 99.5, 98.0)},
             "others_frac_above": {str(t): float(np.mean([p >= t for p in pcts])) if pcts else 0.0 for t in (99.9, 99.5, 98.0)},
+            "others_cls": {s["name"]: s["cls"] for s, p in zip(sites, row) if p is not None},
+            **matched,
         }
         print(f"{q['name'][:24]:24s} {q['cls']:6s} " + " ".join(f"{(f'{p:.1f}' if p is not None else '-'):>10s}" for p in row)
               + f" | {ap_:5.3f} " + " ".join(f"{hits[k]:>7d}" for k in KS)
-              + f" | {np.median(ctl_p):7.1f} {np.median(rnd_p):8.1f} {np.percentile(rnd_p, 90):8.1f}")
+              + f" | {np.median(ctl_p):7.1f} {np.median(rnd_p):8.1f} {np.percentile(rnd_p, 90):8.1f}"
+              + (f"  matched med {matched['matched_random_pct_median']:5.1f} p90 {matched['matched_random_pct_p90']:5.1f}" if matched else ""))
     qs = report["queries"]
     summary = {
         "mean_AP": float(np.mean([v["AP"] for v in qs.values()])),
@@ -296,6 +339,13 @@ def main():
                        for t in ("99.9", "99.5", "98.0")},
         "others_frac_above": {t: float(np.mean([v["others_frac_above"][t] for v in qs.values()])) for t in ("99.9", "99.5", "98.0")},
         "random_frac_above": {t: float(np.mean([v["random_frac_above"][t] for v in qs.values()])) for t in ("99.9", "99.5", "98.0")},
+        **({"matched_random_frac_above": {t: float(np.mean([v["matched_random_frac_above"][t] for v in qs.values()])) for t in ("99.9", "99.5", "98.0")},
+            "matched_enrichment": {t: (float(np.mean([v["others_frac_above"][t] for v in qs.values()]))
+                                       / max(float(np.mean([v["matched_random_frac_above"][t] for v in qs.values()])), 1e-6))
+                                   for t in ("99.9", "99.5", "98.0")},
+            "mean_matched_random_pct_median": float(np.mean([v["matched_random_pct_median"] for v in qs.values()])),
+            "landform": {"source": a.landform, "dims": a.landform_dims, "match_frac": a.match_frac}}
+           if L is not None else {}),
         "wall_to_wall_pct": float(np.mean([p for q in sites if q["cls"] == "wall" for s, p in
                                            ((s, qs[q["name"]]["others"].get(s["name"])) for s in sites if s["cls"] == "wall")
                                            if p is not None])) if any(q["cls"] == "wall" for q in sites) else None,

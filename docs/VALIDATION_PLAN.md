@@ -101,7 +101,10 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
 1. **There is a real signal, and it is specific to earthwork walls.** At 128 px
    (320 ft) the full pipeline puts one of eight other sites in the top 0.1% of
    the county per query, against roughly 0.7% expected for a random 3x3 block,
-   a 21x enrichment (31x with 3x3 pooling; see the multi-scale table below). Walls retrieve walls across sites 15 miles apart
+   a 21x enrichment (31x with 3x3 pooling) against uniform controls, and 6x
+   (8x pooled, 95% CI 3-16x) against landform-matched controls (see the two
+   tables below; most of the uniform-control enrichment is terrace-like
+   landform, but the remainder is specific to the earthworks). Walls retrieve walls across sites 15 miles apart
    (the Wright remnant retrieves Dixon Mound at 100.0 and the Great Circle at
    99.5; downtown Newark on the same terrace scores 60-70), so it is not just
    "Newark terrace texture". Conical mounds are retrieved only partly, the
@@ -116,8 +119,8 @@ statistics 1-3/16. Per-query tables are in `validation/results/`.
    configuration of the pipeline tested.
 4. **It is not yet a usable detector.** Mean average precision is 0.005-0.013;
    most sites are not in each other's top 0.1%. It is a candidate ranker that
-   enriches the top of the list by an order of magnitude for wall-type
-   features, with nine positives and uniform (not landform-stratified) controls.
+   enriches the top of the list roughly 8x beyond landform for wall-type
+   features, with nine positives and therefore wide confidence intervals.
 
 ### Multi-scale (2026-10-14)
 
@@ -180,6 +183,65 @@ Reading:
 Decision: keep serving `licking_county_p128_pool3.idx`. Multi-scale is parked
 until more positives exist to tell a two-query AP gain from noise.
 
+### Landform-matched controls and confidence intervals (2026-10-14)
+
+The uniform random controls above sample the whole county, including ravines,
+hillsides and floodplain, while every ground-truth site sits on gently sloping
+terrace or upland. Part of the enrichment could therefore be "looks like a
+terrace" rather than "looks like an earthwork". To separate the two,
+`evaluate_retrieval.py --landform` draws 500 extra control blocks per query
+from the 5% of county cells nearest the query in a four-dimensional landform
+space (log relief std, log mean slope, log TPI-32 std, log plane tilt, each
+z-scored; taken from the 12-d simple terrain statistics at the same patch
+size). `validation/bootstrap_ci.py` resamples the nine queries with
+replacement (5,000 replicates) for 95% intervals; the control blocks are not
+the dominant source of uncertainty, the query count is.
+
+| vectors (128 px) | random block median pct | matched block median pct | top 0.1% enrichment vs uniform | vs landform-matched | top 0.5% vs uniform | vs matched | wall-to-wall pct |
+|---|---|---|---|---|---|---|---|
+| full pipeline | 86.6 | 94.7 | 21x [4, 50] | 6x [1, 11] | 7x [4, 11] | 2x [1, 4] | 98.9 [98.7, 99.2] |
+| **full pipeline, pooled (served)** | 69.5 | 90.0 | 31x [12, 52] | **8x [3, 16]** | 12x [5, 20] | 4x [2, 6] | 99.5 [99.1, 99.8] |
+| full + 256 px parent, pooled | 69.1 | 87.5 | 20x [6, 42] | 11x [4, 20] | 13x [7, 21] | 5x [3, 10] | 99.0 [98.5, 99.4] |
+| plain-LRM analysis vector | 86.6 | 95.2 | 7x [0, 19] | 2x [0, 6] | 5x [1, 10] | 2x [0, 4] | 95.1 [92.0, 98.2] |
+| plain-LRM, pooled | 71.5 | 89.9 | 8x [0, 16] | 3x [0, 5] | 6x [4, 8] | 2x [1, 3] | 96.6 [93.1, 98.9] |
+| simple terrain stats, pooled | 66.4 | 88.9 | 6x [0, 17] | 1x [0, 3] | 4x [0, 8] | 1x [0, 2] | 96.1 [92.7, 97.9] |
+| production 64 px index, pooled | 70.0 | 81.9 | 7x [0, 13] | 5x [0, 7] | 7x [3, 13] | 4x [2, 8] | 98.3 [97.0, 99.4] |
+
+Sensitivity for the served configuration: drawing matched controls from the
+nearest 2% / 5% / 10% of the county gives 7.5x / 8.3x / 10.1x at the top
+0.1%; matching on eight of the twelve simple statistics instead of four gives
+6.2x.
+
+Per-class fraction of other sites at or above the 99.5th percentile (served
+configuration): wall->wall 0.62 (16 pairs), wall->mound 0.23 (13),
+mound->wall 0.15 (13), mound->mound 0.17 (6), wall->pits 0.20 (5), nothing
+retrieves the Flint Ridge pits and the pits retrieve nothing.
+
+Reading:
+
+- **About three quarters of the uniform-control enrichment was landform.** A
+  random terrace-like block scores at the 90th-95th percentile against an
+  earthwork query, against the 70th-87th for a uniformly random block. The
+  simple-statistics vector, which is built from the same quantities the
+  controls are matched on, drops to 1x as it should, which is the check that
+  the matching works.
+- **A signal beyond landform remains and its interval excludes 1x.** The
+  served configuration enriches the top 0.1% 8x [3x, 16x] against
+  landform-matched controls; the plain-LRM vector 3x [0x, 5x]; the 64 px
+  index 5x [0x, 7x]. The decomposition's advantage over the plain LRM
+  (about 3x) survives matching.
+- **The 128+256 concatenation looks better under matched controls (11x
+  [4x, 20x], 5x at the top 0.5%)** than under uniform ones, which is
+  consistent with the 256 px parent adding context that is not landform. The
+  intervals overlap the served configuration's heavily and the gain still
+  rests on two queries, so it stays parked, but it is the first candidate to
+  re-test when more positives exist.
+- **Intervals are wide because there are nine queries.** Every "x vs y"
+  comparison between configurations overlaps at 95%; only the comparisons
+  against 1x (no enrichment) and against the simple statistics are clear.
+  The matched controls may also contain unrecorded earthworks, which would
+  deflate the enrichment, not inflate it.
+
 ### Next steps, in order of value per hour
 
 - Done 2026-10-14: `data/licking_county/licking_county_p128.idx` assembled from the
@@ -192,8 +254,11 @@ until more positives exist to tell a two-query AP gain from noise.
 - Done 2026-10-14: multi-scale (32, 128, 256 px and the 32+128, 128+256
   concatenations; table above). 128 px pooled stays the served configuration.
   Open: a 64 px `baseline_features.py` pass to explain the 64 px dip.
-- More positives (OAI access, Salisbury 1862 georeferencing) and controls
-  stratified by landform, then report per class with confidence intervals.
+- Done 2026-10-14: landform-matched controls and query-level bootstrap
+  intervals (table above; `--landform`, `validation/bootstrap_ci.py`).
+- More positives (OAI access, Salisbury 1862 georeferencing); every interval
+  above is limited by the nine queries. Re-test the 128+256 concatenation
+  when they exist.
 - Ross County transfer against High Bank Works and Hopeton (open 3DEP lidar).
 
 ## 3. What a determination needs
