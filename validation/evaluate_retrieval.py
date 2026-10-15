@@ -148,8 +148,8 @@ def zscore_inplace(X: np.ndarray, mean: np.ndarray, std: np.ndarray, dim: int, c
     return placed
 
 
-def pool3(Z: np.ndarray, placed: np.ndarray, rows: int, cols: int) -> np.ndarray:
-    """Mean over each cell's placed 3x3 neighbours (zero-padded at the grid edges, no wrap).
+def pool3(Z: np.ndarray, placed: np.ndarray, rows: int, cols: int, radius: int = 1) -> np.ndarray:
+    """Mean over each cell's placed (2r+1)x(2r+1) neighbours (zero-padded at the grid edges, no wrap).
 
     Unplaced rows of ``Z`` are zero, so no mask multiply is needed; peak memory
     is the input plus one output array.
@@ -157,8 +157,8 @@ def pool3(Z: np.ndarray, placed: np.ndarray, rows: int, cols: int) -> np.ndarray
     Zg = Z.reshape(rows, cols, -1)
     Pg = placed.reshape(rows, cols).astype(np.float32)
     acc = np.zeros_like(Zg); cnt = np.zeros_like(Pg)
-    for dr in (-1, 0, 1):
-        for dc in (-1, 0, 1):
+    for dr in range(-radius, radius + 1):
+        for dc in range(-radius, radius + 1):
             tr = slice(max(0, -dr), rows - max(0, dr)); tc = slice(max(0, -dc), cols - max(0, dc))
             sr = slice(max(0, dr), rows - max(0, -dr)); sc = slice(max(0, dc), cols - max(0, -dc))
             acc[tr, tc] += Zg[sr, sc]

@@ -244,6 +244,12 @@ Reading:
 
 ### Next steps, in order of value per hour
 
+- Done 2026-10-14: the general multi-class benchmark (22 terrain classes
+  from public ODNR and OpenStreetMap layers) is in `CLASS_BENCHMARK.md`;
+  it supersedes "more earthwork positives" as the main validation track,
+  since terravector is a general terrain search and earthworks are one hard
+  class within it.
+
 - Done 2026-10-14: `data/licking_county/licking_county_p128.idx` assembled from the
   EC2 vectors (`validation/assemble_index_from_vectors.py`, 215,169 patches,
   143 s HNSW build on 4 cores); `validation/results/eval_index_p128*.json`
