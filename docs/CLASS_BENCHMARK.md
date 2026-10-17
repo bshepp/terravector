@@ -1,4 +1,4 @@
-# Multi-class terrain retrieval benchmark (Licking County, 2026-10-14)
+# Multi-class terrain retrieval benchmark (Licking County, 2026-10-14; landform labels extended 2026-10-17)
 
 terravector is meant to be a general query-by-example terrain search, not an
 earthwork detector. The earthwork protocol in `VALIDATION_PLAN.md` tests one
@@ -9,20 +9,25 @@ which types does that work?
 
 ## Classes and labels
 
-Twenty-two classes rasterized onto the county cell grid by
-`validation/build_class_grid.py` from public layers fetched on 2026-10-14 by
-`validation/fetch_class_layers.py` (no account needed for any of them):
+Thirty-six classes rasterized onto the county cell grid by
+`validation/build_class_grid.py` from public layers fetched on 2026-10-14 and
+2026-10-17 by `validation/fetch_class_layers.py` and
+`validation/fetch_ssurgo_landforms.py` (no account needed for any of them):
 
 | source | classes | note |
 |---|---|---|
 | ODNR Geological Survey, Quaternary Geology of Ohio 1:500,000 | end moraine, hummocky moraine, ground moraine, dissected ground moraine, kames and eskers, outwash terraces, alluvium, lacustrine, unglaciated colluvium | kilometre-scale map units; see "label scale" below |
+| ODNR Geological Survey, Surficial Geology stack-unit map 1:24,000 (GeologyMapViewer service, layer 13; `sm24_*`) | till (T, Ti), outwash sand and gravel (SG, SGi, S, Si), ice-contact kame and esker deposits (IC, ICi), lacustrine fines (LC, L), alluvium (a), eolian sand (E), bedrock at the surface (P, SsSh, Sh), made land and pits (m, Pit, Quarry) | surface unit of the stack (field L1G); 2,130 polygons cover the whole county; code meanings follow the SG-series legends and are the author's reading |
+| USDA-NRCS SSURGO soil survey, Licking County OH089 (Soil Data Access; `ss_*`) | terrace, flood plain, end moraine, ground moraine (incl. till plain), lake plain, hills and ridges, depression, knoll and rise | 1:12,000-1:24,000 map units labelled with the landform of their dominant component (`cogeomordesc`); 21,493 of 21,706 polygons classified. The survey names no kames, eskers or outwash plains in this county |
 | ODNR Mineral Resources, Mines of Ohio | surface mines (historic from topo maps, surface-affected areas, past coal and industrial-mineral surface mines) plus OSM quarries | 94 features, 821 cells |
 | OpenStreetMap (Overpass) | active railway, abandoned railway, motorway/trunk, runway, open water, dam/embankment, stream channel, landfill, cemetery, golf course, residential | lines buffered 100-150 ft |
 | `validation/gt_sites.json` | earthwork | 7 features, 60 cells |
 
 A cell carries a class when its centre falls inside the (dissolved) polygon.
-Cell counts are 22 (landfill) to 47,865 (ground moraine) on the 215,169-cell
-128 px grid. Grids for 64 px and 256 px are built the same way
+Cell counts are 22 (landfill) to 140,601 (24k till, 62% of the county) on the
+215,169-cell 128 px grid. Enrichment is bounded by 1/base rate, so for the
+largest classes (24k till, SSURGO ground moraine, bedrock uplands, hills and
+ridges) the median percentile column, not enrichment, is the figure to read. Grids for 64 px and 256 px are built the same way
 (`validation/class_grid_p{64,128,256}.npz`).
 
 ## Protocol
@@ -75,6 +80,87 @@ unpooled; the plain-LRM analysis vector and simple statistics at 128 px,
 256 px is near random for every class (macro 1.2x unpooled, 1.5x pooled;
 `validation/results/classes_full_p256*.json`) and is not shown.
 
+Macro rows in the table above are over the 22 original classes.
+
+### Finer landform labels (added 2026-10-17)
+
+The two items that headed the data wishlist turned out to be public after
+all: ODNR serves its 1:24,000 surficial stack-unit map through the
+GeologyMapViewer ArcGIS service (2,130 polygons cover the county), and the
+Licking County SSURGO soil survey, with a landform name per soil component,
+is queryable from USDA Soil Data Access without an account. Fourteen classes
+were added from them (`sm24_*`, `ss_*`), the grids rebuilt and every
+configuration rerun; the 22 original classes keep the values above exactly
+(query sampling is seeded and class-ordered).
+
+| class | cells | base % | 128 px | 128 px 3x3 | 128 px 7x7 | 128 px 15x15 | 64 px | 64 px 3x3 | 256 px 3x3 | LRM 128 3x3 | simple 128 3x3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| sm24_till | 132058 | 60.9 | 1.0x [0.9,1.1] | 1.0x [0.9,1.1] | 0.9x [0.8,1.1] | 0.9x [0.7,1.0] | 1.0x [0.9,1.0] | 0.9x [0.8,1.1] | 0.9x [0.8,1.0] | 1.0x [0.9,1.1] | 0.9x [0.8,1.0] |
+| sm24_outwash | 18786 | 8.4 | 0.9x [0.7,1.1] | 1.2x [0.8,1.6] | 1.4x [0.9,1.9] | 1.7x [1.2,2.2] | 1.2x [1.0,1.5] | **1.8x [1.3,2.5]** | 1.3x [1.0,1.7] | 1.2x [0.9,1.6] | 1.4x [1.0,1.8] |
+| sm24_ice_contact (kames, eskers) | 1853 | 0.8 | 1.7x [1.3,2.1] | 2.6x [1.9,3.4] | 2.1x [1.4,2.8] | **2.8x [1.8,3.9]** | 1.5x [1.2,1.9] | 2.7x [1.8,3.8] | 2.5x [1.9,3.3] | 2.2x [1.5,3.0] | 1.6x [1.2,2.1] |
+| sm24_lacustrine | 7552 | 3.4 | 1.4x [1.2,1.7] | 1.7x [1.2,2.1] | 1.7x [1.2,2.1] | 1.7x [1.4,2.2] | 1.2x [1.0,1.4] | 1.6x [1.3,2.0] | 1.5x [1.3,1.8] | **2.0x [1.5,2.5]** | 1.1x [0.8,1.4] |
+| sm24_alluvium | 21348 | 9.8 | **3.0x [2.2,3.9]** | 2.1x [1.5,2.8] | 1.3x [1.0,1.7] | 1.0x [0.8,1.2] | 2.1x [1.6,2.8] | 2.3x [1.6,3.1] | 0.9x [0.8,1.0] | 2.0x [1.5,2.5] | 1.9x [1.4,2.5] |
+| sm24_eolian (dune sand) | 564 | 0.2 | 6.6x [5.0,8.5] | 6.2x [4.4,8.0] | 7.3x [5.0,9.8] | 8.0x [6.0,9.9] | 10.0x [6.9,13.6] | **11.0x [7.2,15.3]** | 2.9x [2.2,3.6] | 8.0x [5.8,10.3] | 2.6x [2.0,3.3] |
+| sm24_bedrock_surface | 29939 | 13.4 | 3.0x [2.6,3.4] | 3.6x [3.3,4.0] | 3.5x [3.1,3.9] | 3.3x [2.8,3.7] | 3.0x [2.5,3.4] | 3.4x [3.0,3.9] | 2.0x [1.7,2.3] | 3.3x [2.9,3.6] | **3.8x [3.5,4.2]** |
+| sm24_made_land (incl. pits) | 807 | 0.4 | 8.5x [6.0,11.4] | 20.6x [15.1,26.4] | **29.9x [23.2,37.3]** | 16.5x [11.1,22.3] | 10.1x [6.5,14.0] | 20.9x [13.8,28.4] | 2.0x [1.5,2.4] | 17.7x [12.1,23.7] | 12.1x [8.8,15.6] |
+| ss_terrace | 25065 | 11.5 | 1.6x [1.3,1.9] | **2.0x [1.6,2.4]** | 2.0x [1.6,2.4] | 2.0x [1.5,2.5] | 1.5x [1.3,1.7] | 1.6x [1.3,2.1] | 1.5x [1.2,1.7] | 1.9x [1.6,2.2] | 1.6x [1.3,1.9] |
+| ss_flood_plain | 16621 | 7.4 | 3.9x [3.1,4.7] | 3.7x [3.0,4.4] | 2.8x [2.2,3.5] | 2.2x [1.7,2.8] | 4.5x [3.5,5.6] | **5.3x [4.2,6.5]** | 1.1x [1.0,1.2] | 3.1x [2.6,3.6] | 2.8x [2.2,3.3] |
+| ss_end_moraine | 21617 | 10.0 | 1.8x [1.5,2.1] | 2.2x [1.8,2.6] | **2.4x [2.0,2.8]** | 2.3x [1.9,2.6] | 1.6x [1.4,1.9] | 2.2x [1.7,2.6] | 1.4x [1.2,1.6] | 1.9x [1.6,2.3] | 1.8x [1.5,2.2] |
+| ss_ground_moraine | 60265 | 27.5 | 1.7x [1.5,1.9] | 1.8x [1.5,2.0] | 1.8x [1.6,1.9] | 1.7x [1.5,1.9] | 1.5x [1.3,1.7] | 1.5x [1.3,1.8] | 1.5x [1.4,1.7] | 1.8x [1.6,2.0] | 1.6x [1.4,1.8] |
+| ss_lake_plain | 3929 | 1.8 | 2.1x [1.7,2.4] | 1.8x [1.4,2.2] | 2.3x [1.7,2.9] | 2.2x [1.7,2.8] | 2.2x [1.8,2.7] | 1.8x [1.4,2.3] | 1.0x [0.9,1.2] | **3.0x [2.2,3.8]** | 1.7x [1.3,2.1] |
+| ss_hills_ridges | 43039 | 19.1 | 3.2x [2.8,3.7] | 3.8x [3.4,4.2] | 3.7x [3.4,4.0] | 3.3x [2.9,3.6] | 3.8x [3.3,4.2] | **4.3x [3.9,4.7]** | 2.0x [1.6,2.3] | 3.4x [3.0,3.9] | 3.8x [3.5,4.2] |
+| ss_depression | 14283 | 6.3 | 3.0x [2.6,3.4] | 3.2x [2.8,3.6] | **3.7x [3.1,4.1]** | 3.6x [3.0,4.1] | 3.1x [2.6,3.6] | 3.0x [2.6,3.5] | 2.5x [2.1,2.8] | 3.3x [2.9,3.7] | 3.3x [2.9,3.6] |
+| ss_knoll_rise | 852 | 0.4 | 2.1x [1.6,2.7] | 3.9x [2.6,5.4] | 6.4x [4.3,8.5] | **13.5x [9.6,17.5]** | 4.2x [3.1,5.4] | 7.4x [5.4,9.6] | 2.1x [1.7,2.5] | 3.9x [2.5,5.4] | 5.0x [3.5,6.6] |
+| **macro mean, 37 classes** | | | 4.2x | 4.1x | 4.5x | 4.2x | 4.7x | 5.4x | 1.6x | 3.9x | 2.8x |
+| **macro geometric mean, 37 classes** | | | 2.8x | 2.3x | 2.9x | 3.0x | 3.0x | 2.9x | 1.4x | 2.3x | 1.9x |
+| **median percentile, 37 classes** | | | 61.6 | 62.6 | 63.2 | 63.2 | 59.9 | 61.8 | 55.7 | 62.6 | 61.8 |
+
+Median percentile of same-class cells for the large classes, where
+enrichment is capped near 1/base rate: 24k till 46-50 (no signal; it is the
+background of the county), SSURGO ground moraine 59-63, terrace 51-57,
+bedrock at surface 71-83, hills and ridges 74-86.
+
+What the finer labels change:
+
+1. **The kame gap is mostly real geomorphology, not a label artefact.**
+   Moving from the 1:500k "kames and eskers" unit (0.9-1.3x) to 1:24k
+   ice-contact deposits lifts retrieval to 2.6x [1.9, 3.4] at 3x3 and 2.8x at
+   15x15, a signal, but a weak one. The cell statistics say why: ice-contact
+   cells have a median within-cell elevation standard deviation of 3.4 ft
+   against 2.6 ft for SSURGO ground moraine, with the same 90th percentile
+   (8.5 vs 8.3 ft). In this county the ice-contact *material* polygons are
+   not distinctly shaped at 320 ft; many are kame terraces and pitted
+   outwash, and the stack map labels material, not landform. SSURGO names no
+   kame or esker landform anywhere in the county. The 1:500k kame queries
+   retrieve made land and surface mines (2.4-2.6x): gravel pits worked into
+   the kames, which is at least the right neighbourhood. Testing further
+   needs a landform-shape layer (digitised kame and esker symbols from the
+   SG-series quadrangle maps), not another material map.
+2. **Two new classes join the "works well" group.** Eolian sand (dunes and
+   sand sheets, 564 cells) is retrieved 6.6x at 128 px and 10-11x at 64 px
+   with a median percentile of 74-83; made land and pits reach 30x at 7x7.
+   Knolls and rises (SSURGO, 852 cells) go from 2.1x unpooled to 13.5x at
+   15x15, the clearest case yet that compact landforms want a wide
+   neighbourhood.
+3. **SSURGO landforms beat the 1:500k units everywhere they overlap.** End
+   moraine 1.0x -> 2.2-2.4x, flood plain 3.9x (5.3x at 64 px 3x3),
+   depressions 3.0-3.7x, terraces 2.0x, lake plains 2.1-3.0x. Ground moraine
+   at 1.7-1.8x is a third of its 3.6x cap. Bedrock-controlled uplands
+   (13-19% of the county) are the one landform class close to segmentable:
+   median percentile 81-86, with simple relief statistics doing as well as
+   the full pipeline because the class is defined by relief.
+4. **On landform classes the decomposition's lead over the plain LRM is
+   narrow.** LRM pooled matches or beats the full pipeline on eolian sand,
+   lacustrine fines and lake plains; the full pipeline's clear wins remain
+   the built and excavated classes (made land 30x vs 18x, earthworks, mines,
+   railways). Over all 37 classes the geometric mean is 2.8-3.0x for the full
+   pipeline (best at 7x7, 15x15 and at 64 px), 2.3x for LRM 3x3, 1.9x for
+   simple statistics and 1.2-1.4x for 256 px.
+5. **The 64 px index has the best macro mean (5.4x pooled) and takes seven
+   classes outright** (eolian sand, flood plains, hills and ridges, outwash,
+   motorways, abandoned railways, open water), which strengthens the case
+   for serving both resolutions.
+
 ## Reading
 
 1. **Discrete, built or excavated features retrieve well; mapped glacial
@@ -86,17 +172,17 @@ unpooled; the plain-LRM analysis vector and simple statistics at 128 px,
    including the simple statistics.
 2. **The glacial failure is mostly label scale, with one real gap.** At
    320 ft the till, outwash, alluvium and lacustrine units are physically
-   identical: median cell relief 2.0-2.8 ft and mean slope 0.12-0.19 for all
-   of them (only dissected moraine and unglaciated colluvium, 10-13 ft, and
-   kames, 4.9 ft, differ). The 1:500,000 map describes kilometre-scale
+   identical: median within-cell elevation standard deviation 2.0-2.8 ft and
+   mean slope 0.12-0.19 for all of them (only dissected moraine and
+   unglaciated colluvium, 10-13 ft, and kames, 4.9 ft, differ). The 1:500,000 map describes kilometre-scale
    assemblages, so a 128 px cell inside "end moraine" is usually flat
    farmland indistinguishable from ground moraine. Widening the pooling
    neighbourhood recovers the water-laid units (alluvium 1.9x -> 6.5x,
    outwash 1.5x -> 3.0x, colluvium 2.9x -> 4.9x at 15x15) but not the till
-   units, and not kames and eskers (1.3x at best), which are tens of feet
-   high and should be retrievable at these scales. That last one is the
-   real gap to chase, and it needs a larger-scale map to be sure the
-   polygons contain kames at all.
+   units, and not kames and eskers (1.3x at best). The finer-label section
+   above follows this up: at 1:24k the ice-contact deposits reach 2.6x, and
+   the cell statistics show they are barely rougher than till here, so the
+   gap is mostly geomorphic reality rather than an index failure.
 3. **Pooling radius is a property of the query class, not the index.**
    Linear features want no pooling (active railway 33x unpooled -> 10x at
    3x3; streams 5.5x -> 2.4x), compact features want 3x3-7x7 (surface
@@ -110,8 +196,9 @@ unpooled; the plain-LRM analysis vector and simple statistics at 128 px,
    Serving two resolutions (64 and 128 px) with selectable pooling covers
    the classes tested.
 5. **The decomposition's gain over a plain local relief model is moderate
-   and broad.** Macro geometric mean 3.2x (full) vs 2.8x (LRM unpooled) vs
-   2.1x (simple); the largest gains are on open water, runways, earthworks,
+   and broad.** Macro geometric mean over the 22 original classes 3.2x
+   (full) vs 2.8x (LRM unpooled) vs 2.1x (simple), and 2.8-3.0x vs 2.3x vs
+   1.9x over all 37; the largest gains are on open water, runways, earthworks,
    surface mines and motorways. Simple slope/curvature statistics are not
    random on this benchmark (railways 12x, colluvium 3.7x) because several
    classes are defined by relief.
@@ -139,14 +226,26 @@ freely among themselves.
   `VALIDATION_PLAN.md`.
 - Queries are single cells; a user would often query with a drawn polygon
   (mean of its cells), which should only help.
+- The 1:24k stack map labels surface *material* and SSURGO labels the
+  landform of the dominant soil component; neither is a per-cell landform
+  shape. An ice-contact polygon may be a flat kame terrace; a map unit named
+  for end moraines covers its swales too. Classes over about 10% of the
+  county have enrichment capped near 1/base rate; read their median
+  percentile instead.
+- Stack-map code meanings (T till, SG sand and gravel, IC ice-contact, LC
+  lacustrine, a alluvium, E eolian, m made land, P and SsSh bedrock) follow
+  the ODNR SG-series legends as read by the author; the service itself
+  publishes only the codes.
 
 ## Data that would improve this benchmark
 
-- **ODNR 1:24,000 surficial geology** (quadrangle maps of unconsolidated
-  deposits, or the county surficial-geology series) to replace the 1:500k
-  units for kames, eskers, outwash and terraces.
-- **NRCS SSURGO / gSSURGO** map units with landform attributes (terrace,
-  floodplain, kame, moraine, upland) at 1:12,000-1:24,000.
+- Done 2026-10-17: **ODNR 1:24,000 surficial stack-unit map** (public ArcGIS
+  service) and **SSURGO landform attributes** (Soil Data Access), see the
+  finer-label section. Both are material or soil maps; what is still missing
+  is a **landform-shape layer for kames and eskers** (digitised point and
+  line symbols from the ODNR SG-series quadrangle PDFs, or field-checked
+  sites) to decide whether the remaining 2.6x is as good as the geomorphology
+  allows.
 - **NHDPlus High Resolution** for channel and floodplain classes instead of
   OpenStreetMap streams.
 - **ODOT landslide inventory** (Office of Geotechnical Engineering) for a

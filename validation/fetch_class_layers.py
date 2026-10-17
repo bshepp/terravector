@@ -2,7 +2,8 @@
 
 All sources are open and need no account:
   * ODNR Division of Geological Survey, Quaternary Geology of Ohio 1:500,000
-    (ArcGIS FeatureServer; polygons exported in EPSG:3735)
+    and the Surficial Geology stack-unit map 1:24,000 (ArcGIS services;
+    polygons exported in EPSG:3735)
   * ODNR Division of Mineral Resources Management, Mines of Ohio (surface
     mine polygons: historic from topo maps, surface affected areas, past coal
     and industrial-mineral surface mines)
@@ -11,6 +12,8 @@ All sources are open and need no account:
     residential), fetched in four queries with retries across mirrors.
 
     python validation/fetch_class_layers.py --out <dir> [--bbox W,S,E,N]
+
+SSURGO landform polygons come from validation/fetch_ssurgo_landforms.py.
 """
 import argparse
 import json
@@ -22,6 +25,7 @@ import requests
 ODNR = "https://gis.ohiodnr.gov/arcgis/rest/services/"
 ARCGIS_LAYERS = {
     "quaternary_units.geojson": ODNR + "DGS_Services/Quaternary_Geology_500K_AGOL/FeatureServer/2",
+    "surficial24k_polygons.geojson": ODNR + "DGS_Services/GeologyMapViewer/MapServer/13",
     "mines_hist_topo.geojson": ODNR + "MRM_Services/MinesOfOhio/MapServer/14",
     "mines_surface_affected.geojson": ODNR + "MRM_Services/MinesOfOhio/MapServer/8",
     "coal_surface_past.geojson": ODNR + "MRM_Services/MinesOfOhio/MapServer/13",
@@ -48,7 +52,7 @@ def fetch_arcgis(url, out, env):
         p = {"f": "geojson", "where": "1=1", "geometry": json.dumps(env), "geometryType": "esriGeometryEnvelope", "inSR": 4326,
              "spatialRel": "esriSpatialRelIntersects", "outFields": "*", "returnGeometry": "true", "outSR": 3735,
              "resultOffset": offset, "resultRecordCount": 1000}
-        j = requests.get(url + "/query", params=p, timeout=180).json()
+        j = requests.get(url + "/query", params=p, headers=UA, timeout=300).json()
         if "error" in j:
             print(out.name, "error", j["error"]); return
         feats += j.get("features", [])

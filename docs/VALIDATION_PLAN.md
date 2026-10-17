@@ -245,7 +245,9 @@ Reading:
 ### Next steps, in order of value per hour
 
 - Done 2026-10-14: the general multi-class benchmark (22 terrain classes
-  from public ODNR and OpenStreetMap layers) is in `CLASS_BENCHMARK.md`;
+  from public ODNR and OpenStreetMap layers, extended to 36 on 2026-10-17
+  with the ODNR 1:24k surficial map and SSURGO landforms) is in
+  `CLASS_BENCHMARK.md`;
   it supersedes "more earthwork positives" as the main validation track,
   since terravector is a general terrain search and earthworks are one hard
   class within it.

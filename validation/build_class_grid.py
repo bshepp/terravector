@@ -12,6 +12,13 @@ convention, row 0 = north, same indexing as evaluate_retrieval.Grid):
 Sources (all public, fetched by validation/fetch_class_layers.py into --layers):
   ODNR Division of Geological Survey, Quaternary Geology of Ohio 1:500k
     (glacial landform units), ArcGIS FeatureServer, EPSG:3735 export.
+  ODNR Division of Geological Survey, Surficial Geology stack-unit map
+    1:24,000 (GeologyMapViewer layer 13; surface unit genesis code L1G:
+    T/Ti till, SG/SGi outwash sand and gravel, IC/ICi ice-contact kame and
+    esker deposits, LC lacustrine fines, a alluvium, E eolian sand, m made
+    land, P and SsSh bedrock at the surface).
+  USDA-NRCS SSURGO soil survey (1:12,000-1:24,000) map units labelled with
+    the landform of their dominant component (validation/fetch_ssurgo_landforms.py).
   ODNR Division of Mineral Resources Management, Mines of Ohio
     (historic and permitted surface mines, coal and industrial minerals).
   OpenStreetMap via Overpass (railways, motorways, water bodies, dams,
@@ -37,6 +44,8 @@ FT_PER_DEG = None  # OSM comes in lon/lat; reprojected with pyproj below
 #   selector: callable(properties) -> bool
 #   kind: "poly" fills polygons; "line" buffers lines by buffer_ft
 QUAT = "quaternary_units.geojson"
+SM24 = "surficial24k_polygons.geojson"
+SSURGO = "ssurgo_OH089_landforms.geojson"
 CLASSES = {
     "end_moraine": [(QUAT, lambda p: p.get("UNIT_NAME") == "End moraine", "poly", 0)],
     "hummocky_moraine": [(QUAT, lambda p: p.get("UNIT_NAME") == "Hummocky moraine", "poly", 0)],
@@ -63,6 +72,19 @@ CLASSES = {
     "golf_course": [("osm_landuse.json", lambda p: p.get("leisure") == "golf_course", "poly", 0)],
     "residential": [("osm_landuse.json", lambda p: p.get("landuse") == "residential", "poly", 0)],
     "earthwork": [("gt_sites", lambda p: True, "point", 0)],
+    # ODNR 1:24,000 surficial stack-unit map, surface unit genesis (L1G)
+    "sm24_till": [(SM24, lambda p: p.get("L1G") in ("T", "Ti"), "poly", 0)],
+    "sm24_outwash": [(SM24, lambda p: p.get("L1G") in ("SG", "SGi", "S", "Si"), "poly", 0)],
+    "sm24_ice_contact": [(SM24, lambda p: p.get("L1G") in ("IC", "ICi"), "poly", 0)],
+    "sm24_lacustrine": [(SM24, lambda p: p.get("L1G") in ("LC", "L"), "poly", 0)],
+    "sm24_alluvium": [(SM24, lambda p: p.get("L1G") == "a", "poly", 0)],
+    "sm24_eolian": [(SM24, lambda p: p.get("L1G") == "E", "poly", 0)],
+    "sm24_bedrock_surface": [(SM24, lambda p: p.get("L1G") in ("P", "SsSh", "Sh"), "poly", 0)],
+    "sm24_made_land": [(SM24, lambda p: p.get("L1G") == "m" or p.get("LITH") in ("Pit", "Quarry"), "poly", 0)],
+    # SSURGO map units by dominant-component landform (ss_* classes assigned by fetch_ssurgo_landforms.py)
+    **{c: [(SSURGO, (lambda c: lambda p: p.get("cls") == c)(c), "poly", 0)] for c in
+       ("ss_terrace", "ss_flood_plain", "ss_end_moraine", "ss_ground_moraine", "ss_lake_plain", "ss_hills_ridges",
+        "ss_depression", "ss_kame_esker", "ss_outwash_plain", "ss_knoll_rise", "ss_reclaimed", "ss_flat")},
 }
 
 
