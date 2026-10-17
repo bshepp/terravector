@@ -143,6 +143,8 @@ Enrichment = (fraction of other sites whose best block cell is in the top
 | 32 px + 128 px parent, pooled | 3.4M | 83.7 | 61.8 | 93.7 | 18.5x | 10.6x | 6/16 | 0.0001 |
 | 64 px (production index) | 859k | 90.0 | 85.3 | 94.2 | 5.9x | 4.0x | 7/16 | 0.0004 |
 | 64 px, pooled | 859k | 78.2 | 70.0 | 98.3 | 7.0x | 7.3x | 9/16 | 0.0003 |
+| 64 px (`baseline_features.py`, 2026-10-17) | 859k | 89.9 | 85.6 | 94.0 | 7.8x | 3.8x | 6/16 | 0.0004 |
+| 64 px baseline, pooled | 859k | 78.1 | 70.3 | 98.3 | 7.2x | 6.3x | 8/16 | 0.0003 |
 | **128 px (320 ft)** | 215k | 92.5 | 86.6 | 98.9 | 21.2x | 7.1x | 7/16 | 0.0048 |
 | **128 px, pooled (served)** | 215k | 89.5 | 69.5 | **99.5** | **31.1x** | 12.4x | **10/16** | 0.0131 |
 | 128 px + 256 px parent (1280-d) | 202k | 91.8 | 82.1 | 98.9 | 18.9x | 9.8x | 10/16 | 0.0107 |
@@ -170,11 +172,17 @@ Reading:
   two queries (Eagle Mound 0.034 -> 0.071, Great Circle east wall 0.001 ->
   0.005). With nine queries that is not a reliable improvement, and it doubles
   the vector width, so no multi-scale index is being built from it.
-- **The 64 px dip is unexplained.** The 32 px and 128 px rows come from
-  `validation/baseline_features.py`; the 64 px rows come from the production
-  `build_county_index.py` run, so the dip could be a scale effect or a
-  difference between the two code paths. A 64 px `baseline_features.py` pass
-  (about 25 minutes on the same instance) would settle it; it has not been run.
+- **The 64 px dip is a scale effect, not a code-path difference** (settled
+  2026-10-17). A 64 px `baseline_features.py` pass on EC2 (c7a.16xlarge,
+  38 minutes, about $2) reproduces the production index almost exactly:
+  patch-for-patch median cosine 0.998 between the two vector sets (the
+  residue is float32 input and nodata fill), wall-to-wall percentile 94.0 vs
+  94.2, top 0.1% enrichment 8x [2, 14] vs 6x [1, 10] with overlapping
+  intervals, identical pooled rows. On the class benchmark the baseline
+  vectors score 5.1x macro mean vs 4.7x for the index
+  (`validation/results/eval_full_p64*.json`, `classes_full_p64*.json`). So
+  64 px really is the weaker scale for earthwork walls while being the
+  better one for several other classes (`CLASS_BENCHMARK.md`).
 - **The plain-LRM vector tracks the full pipeline's scale curve** (14x at
   32 px, 7-9x at 128 px, ~0 at 256 px) at a lower level, so the scale
   behaviour is a property of the statistics, and the decomposition's gain
@@ -270,7 +278,8 @@ Reading:
   serve").
 - Done 2026-10-14: multi-scale (32, 128, 256 px and the 32+128, 128+256
   concatenations; table above). 128 px pooled stays the served configuration.
-  Open: a 64 px `baseline_features.py` pass to explain the 64 px dip.
+  Done 2026-10-17: the 64 px `baseline_features.py` pass matches the
+  production index (see "The 64 px dip" above); the dip is real.
 - Done 2026-10-14: landform-matched controls and query-level bootstrap
   intervals (table above; `--landform`, `validation/bootstrap_ci.py`).
 - More positives (OAI access, Salisbury 1862 georeferencing); every interval
