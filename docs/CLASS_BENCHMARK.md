@@ -188,7 +188,9 @@ What the finer labels change:
    3x3; streams 5.5x -> 2.4x), compact features want 3x3-7x7 (surface
    mines 7.6x -> 17x; earthworks 7x -> 22x), broad units want 15x15. A
    general tool should expose the neighbourhood as a query parameter rather
-   than bake 3x3 into the index.
+   than bake 3x3 into the index. Done 2026-10-17: the API takes `pool_radius`
+   and `index` on every request and pools at query time from the unpooled
+   vectors (`src/similarity_raster.py`).
 4. **Scale is also class-dependent, and 64 px is not simply worse.** The
    shipped 64 px index wins on motorways, abandoned railways and open water
    and has the best macro mean (5.8x). 128 px wins on compact features

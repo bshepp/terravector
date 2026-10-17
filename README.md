@@ -233,19 +233,43 @@ The UI runs locally — your data never leaves your machine.
 external tools (QGIS plugin, web frontends, scripts).
 
 ```bash
-# Point at an index built by build_county_index.py
-TERRAVECTOR_INDEX=data/licking_county/licking_county.idx \
-    uvicorn api:app --reload --host 127.0.0.1 --port 8000
+# Serve the 128 px and 64 px county indices side by side (name=path, comma
+# separated; the first is the default). Pooled norms for radii 1 and 3 are
+# precomputed at startup and cached beside each index.
+TERRAVECTOR_INDEXES=p128=data/licking_county/licking_county_p128.idx,p64=data/licking_county/licking_county.idx \
+TERRAVECTOR_POOL_RADII=1,3 \
+    uvicorn api:app --host 127.0.0.1 --port 8000
+
+# One index (legacy form)
+TERRAVECTOR_INDEX=data/licking_county/licking_county_p128.idx uvicorn api:app
 ```
 
 Interactive Swagger docs at `http://127.0.0.1:8000/docs`.
 
 **Endpoints:**
-- `GET  /health` — index/bridge readiness
-- `GET  /info` — index stats, county bounds (both State Plane and WGS84), signature types
-- `POST /query/by-id` — `{patch_id, k}` → similar patches enriched with bbox + center
-- `POST /query/by-coords` — `{lon, lat, k}` or `{x, y, crs, k}` → resolves to a patch, then queries
-- `GET/POST /similarity/raster` — county-wide similarity map for one query location, as a GeoTIFF
+- `GET  /health` — readiness, names of the loaded indices
+- `GET  /info[?index=]` — index stats, county bounds (both State Plane and WGS84), signature types, the list of indices with their patch size and stored pooling
+- `POST /query/by-id` — `{patch_id, k, index?, pool_radius?}` → similar patches enriched with bbox + center
+- `POST /query/by-coords` — `{lon, lat, k, ...}` or `{x, y, crs, k, ...}` → resolves to a patch, then queries
+- `GET/POST /similarity/raster` — county-wide similarity map for one query location, as a GeoTIFF; takes `index` and `pool_radius` too
+
+**Resolution and neighbourhood are query parameters.** The multi-class
+benchmark (`docs/CLASS_BENCHMARK.md`) found that the best patch size and
+pooling radius depend on what is being searched for: linear features want
+single 128 px cells or the 64 px index, compact features want 3x3-7x7
+neighbourhoods, broad landforms want 15x15. So instead of baking one choice
+into the index, every request names an `index` and a `pool_radius` (0 = the
+cell alone, 1 = 3x3, 3 = 7x7, 7 = 15x15, up to 15). A pooled query compares
+the mean vector of the query cell's neighbourhood with the mean vector of
+every other cell's neighbourhood; because pooling is linear this is one
+exact scan over the unpooled matrix plus a box filter (`src/similarity_raster.py`),
+identical to what an index built with `--pool r` would store, and it needs
+only one cached vector of pooled norms per radius
+(`<index>.poolnorms_r<r>.npy`, computed on first use or at startup via
+`TERRAVECTOR_POOL_RADII`). Unpooled `/query` requests still use HNSW; pooled
+ones are exact top-k from the scan and share the raster endpoint's
+concurrency slots. Indices whose stored vectors are already pooled (the
+`_pool3` build) refuse `pool_radius > 0` rather than pool twice.
 
 Spatial endpoints return results with both State Plane (EPSG:3735, ft) and
 WGS84 bounding boxes when the index ships with a `*.corpus.json` sidecar.
@@ -261,17 +285,18 @@ patch (160 ft for the Licking County build), NaN where there is no patch, with
 the query cell at 1.0. Any GIS can style it as a heat map; no plugin needed.
 
 ```bash
-# Query by patch id, WGS84, or State Plane; value=similarity (default) or distance
-curl -o great_circle.tif "http://127.0.0.1:8000/similarity/raster?lon=-82.4311&lat=40.0410"
-curl -o patch_311270.tif "http://127.0.0.1:8000/similarity/raster?patch_id=311270&value=distance"
+# Query by patch id, WGS84, or State Plane; value=similarity (default) or distance;
+# index= picks the resolution, pool_radius= the neighbourhood (1 = 3x3 cells)
+curl -o great_circle.tif "http://127.0.0.1:8000/similarity/raster?lon=-82.4311&lat=40.0410&pool_radius=1"
+curl -o patch_311270.tif "http://127.0.0.1:8000/similarity/raster?patch_id=311270&value=distance&index=p64"
 
 # GDAL/rasterio/QGIS can read it straight from the URL with the streaming
 # handler (the response is generated on the fly, so plain /vsicurl/ range
 # requests are not supported):
 gdalinfo "/vsicurl_streaming/http://127.0.0.1:8000/similarity/raster?patch_id=311270"
 
-# Offline, without the API:
-python -m src.similarity_raster data/licking_county/licking_county.idx --patch 311270 -o out.tif
+# Offline, without the API (--radius pools at query time the same way):
+python -m src.similarity_raster data/licking_county/licking_county_p128.idx --patch 77816 --radius 1 -o out.tif
 ```
 
 `GET /info` reports the raster grid (`raster_grid`: rows, cols, cell size,
@@ -287,27 +312,29 @@ python check_coords.py --lat 40.0410 --lon -82.4311 \
 
 ## Which county index to serve
 
-Two county indices exist locally (both gitignored):
+Three county indices exist locally (all gitignored):
 
 | file | patch | cells | built | use |
 |---|---|---|---|---|
-| `data/licking_county/licking_county.idx` | 64 px (160 ft) | 858,642 | 2026-10-13 | legacy; weakest configuration in the validation |
-| `data/licking_county/licking_county_p128.idx` | 128 px (320 ft) | 215,169 | 2026-10-14 | ~2x the retrieval of the 64 px index on the ground-truth protocol |
-| `data/licking_county/licking_county_p128_pool3.idx` | 128 px, 3x3 pooled | 215,169 | 2026-10-14 | **recommended** — best configuration tested: mean AP 0.013, 10/16 wall pairs above the 99.5th percentile |
+| `data/licking_county/licking_county.idx` | 64 px (160 ft) | 858,642 | 2026-10-13 | **serve as `p64`** — best macro mean on the 36-class benchmark; wins motorways, abandoned railways, open water, flood plains, dune sand, hills |
+| `data/licking_county/licking_county_p128.idx` | 128 px (320 ft) | 215,169 | 2026-10-14 | **serve as `p128`, default** — best for compact features (earthworks, mines, made land) with `pool_radius` 1-3; unpooled for linear features |
+| `data/licking_county/licking_county_p128_pool3.idx` | 128 px, 3x3 pooled | 215,169 | 2026-10-14 | superseded: `p128` with `pool_radius=1` gives the same ranking at query time; kept for clients that cannot pass parameters |
+
+Recommended service: `TERRAVECTOR_INDEXES=p128=...licking_county_p128.idx,p64=...licking_county.idx`
+with `TERRAVECTOR_POOL_RADII=1,3`, and a default of `pool_radius=1` on
+`p128` in clients that search for earthwork-sized features.
 
 The 128 px index was assembled from vectors computed on EC2 with
 `validation/baseline_features.py --mode full --patch-size 128` and
 `validation/assemble_index_from_vectors.py` (HNSW over 215k vectors builds in
-about 2.5 minutes on 4 cores). The pooled variant adds `--pool 1`: each stored vector is the mean of its 3x3
-neighbourhood on the county grid, while the z-score parameters are kept from
-the unpooled vectors (`src/pooling.py`; `corpus.json` records `pooling`).
-Queries by patch id or coordinates use the stored pooled vectors, so they are
-consistent. A query embedded from a single external chip is unpooled and will
-score slightly differently against a pooled corpus; pool its 3x3 neighbourhood
-first if you have it. Point the API at an index with
-`TERRAVECTOR_INDEX=data/licking_county/licking_county_p128_pool3.idx`; the bridge,
-raster endpoint and `check_coords.py` read the patch size from its
-`corpus.json`, so raster cells become 320 ft.
+about 2.5 minutes on 4 cores). The `_pool3` variant adds `--pool 1`: each
+stored vector is the mean of its 3x3 neighbourhood on the county grid, while
+the z-score parameters are kept from the unpooled vectors (`src/pooling.py`;
+`corpus.json` records `pooling`). Since 2026-10-17 the same pooling is
+available at query time on any unpooled index (`pool_radius`), so new
+deployments need only the unpooled builds. The bridge, raster endpoint and
+`check_coords.py` read each index's patch size from its `corpus.json`, so
+raster cells are 320 ft for `p128` and 160 ft for `p64`.
 
 ## Building the Licking County corpus
 

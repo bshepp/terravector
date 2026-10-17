@@ -259,6 +259,15 @@ Reading:
   `licking_county_p128_pool3.idx` (`src/pooling.py`, z-score params from the
   unpooled vectors) reproduces the pooled row above as served
   (`validation/results/eval_index_p128_pool3_served.json`, mean AP 0.0133).
+- Done 2026-10-17: pooling radius and resolution are query parameters. The
+  API serves several indices at once (`TERRAVECTOR_INDEXES`, `index` on every
+  request) and `pool_radius` pools at query time on an unpooled index: one
+  exact scan plus a box filter over the per-cell dot products and a cached
+  vector of pooled norms per radius (`src/similarity_raster.py`), which is
+  identical to the stored-pooled index for the same radius. The `_pool3`
+  index is therefore superseded by `p128` with `pool_radius=1`; serve
+  `p128` and the 64 px index together (`README.md`, "Which county index to
+  serve").
 - Done 2026-10-14: multi-scale (32, 128, 256 px and the 32+128, 128+256
   concatenations; table above). 128 px pooled stays the served configuration.
   Open: a 64 px `baseline_features.py` pass to explain the 64 px dip.
